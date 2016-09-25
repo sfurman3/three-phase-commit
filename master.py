@@ -9,7 +9,6 @@ import time
 from threading import Thread, Lock
 from socket import SOCK_STREAM, socket, AF_INET
 
-leader_lock = Lock()
 leader = -1 # coordinator
 address = 'localhost'
 threads = {}
@@ -37,9 +36,7 @@ class ClientHandler(Thread):
                     if len(s) < 2:
                         continue
                     if s[0] == 'coordinator':
-                        leader_lock.acquire()
                         leader = int(s[1])
-                        leader_lock.release()
                     elif s[0] == 'resp':
                         sys.stdout.write(s[1] + '\n')
                         sys.stdout.flush()
@@ -71,15 +68,16 @@ def send(index, data):
         time.sleep(0.1)
         wait = wait_ack
     pid = int(index)
-    if pid >= 0 and pid in threads:
+    if pid >= 0:
+        if pid not in threads:
+            print 'Master or testcase error!'
+            return
         threads[pid].send(data)
         return
     pid = leader
     while pid not in live_list or live_list[pid] == False:
         time.sleep(0.1)
-        leader_lock.acquire()
         pid = leader
-        leader_lock.release()
     threads[pid].send(data)
 
 def exit():
@@ -112,10 +110,8 @@ def main():
         if cmd == 'start':
             port = int(sp2[3])
             # if no leader is assigned, set the first process as the leader
-            leader_lock.acquire()
             if leader == -1:
                 leader = pid
-            leader_lock.release()
             live_list[pid] = True
             subprocess.Popen(['./process', str(pid), sp2[2], sp2[3]], stdout=open('/dev/null'), stderr=open('/dev/null'))
             # sleep for a while to allow the process be ready
@@ -133,16 +129,12 @@ def main():
         elif cmd == 'crash':
             send(pid, sp1[1])
             if pid == -1:
-                leader_lock.acquire()
                 pid = leader
-                leader_lock.release()
             live_list[pid] = False
         elif cmd[:5] == 'crash':
             send(pid, sp1[1])
             if pid == -1:
-                leader_lock.acquire()
                 pid = leader
-                leader_lock.release()
             crash_later.append(pid)
         elif cmd == 'vote':
             send(pid, sp1[1])
