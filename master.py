@@ -16,7 +16,6 @@ threads = {}
 live_list = {}
 crash_later = []
 wait_ack = False
-wait_ack_lock = Lock()
 
 class ClientHandler(Thread):
     def __init__(self, index, address, port):
@@ -44,13 +43,9 @@ class ClientHandler(Thread):
                     elif s[0] == 'resp':
                         sys.stdout.write(s[1] + '\n')
                         sys.stdout.flush()
-                        wait_ack_lock.acquire()
                         wait_ack = False
-                        wait_ack_lock.release()
                     elif s[0] == 'ack':
-                        wait_ack_lock.acquire()
                         wait_ack = False
-                        wait_ack_lock.release()
             except:
                 print sys.exc_info()
                 self.valid = False
@@ -71,14 +66,10 @@ class ClientHandler(Thread):
 
 def send(index, data):
     global leader, live_list, threads, wait_ack
-    wait_ack_lock.acquire()
-    wait = True
-    wait_ack_lock.release()
+    wait = wait_ack
     while wait:
         time.sleep(0.1)
-        wait_ack_lock.acquire()
         wait = wait_ack
-        wait_ack_lock.release()
     pid = int(index)
     if pid >= 0 and pid in threads:
         threads[pid].send(data)
@@ -138,9 +129,7 @@ def main():
             for c in crash_later:
                 live_list[c] = False
             crash_later = []
-            wait_ack_lock.acquire()
             wait_ack = True
-            wait_ack_lock.release()
         elif cmd == 'crash':
             send(pid, sp1[1])
             if pid == -1:
