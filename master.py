@@ -65,7 +65,7 @@ def send(index, data):
     global leader, live_list, threads, wait_ack
     wait = wait_ack
     while wait:
-        time.sleep(0.1)
+        time.sleep(0.01)
         wait = wait_ack
     pid = int(index)
     if pid >= 0:
@@ -76,7 +76,7 @@ def send(index, data):
         return
     pid = leader
     while pid not in live_list or live_list[pid] == False:
-        time.sleep(0.1)
+        time.sleep(0.01)
         pid = leader
     threads[pid].send(data)
 
@@ -138,6 +138,7 @@ def main():
             crash_later.append(pid)
         elif cmd == 'vote':
             send(pid, sp1[1])
+        time.sleep(0.1)
 
 if __name__ == '__main__':
     main()
