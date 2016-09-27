@@ -22,34 +22,40 @@ class ClientHandler(Thread):
         self.index = index
         self.sock = socket(AF_INET, SOCK_STREAM)
         self.sock.connect((address, port))
+        self.buffer = ""
         self.valid = True
 
     def run(self):
         global leader, threads, wait_ack
         while self.valid:
-            try:
-                data = self.sock.recv(1024)
-                #sys.stderr.write(data)
-                line = data.split('\n')
-                for l in line:
-                    s = l.split()
-                    if len(s) < 2:
-                        continue
-                    if s[0] == 'coordinator':
-                        leader = int(s[1])
-                    elif s[0] == 'resp':
-                        sys.stdout.write(s[1] + '\n')
-                        sys.stdout.flush()
-                        wait_ack = False
-                    elif s[0] == 'ack':
-                        wait_ack = False
-            except:
-                print sys.exc_info()
-                self.valid = False
-                del threads[self.index]
-                self.sock.close()
-                break
-
+            if "\n" in self.buffer:
+                (l, rest) = self.buffer.split("\n",1)
+                self.buffer = rest
+                s = l.split()
+                if len(s) < 2:
+                    continue
+                if s[0] == 'coordinator':
+                    leader = int(s[1])
+                elif s[0] == 'resp':
+                    sys.stdout.write(s[1] + '\n')
+                    sys.stdout.flush()
+                    wait_ack = False
+                elif s[0] == 'ack':
+                    wait_ack = False
+                else:
+                    print s
+            else:
+                try:
+                    data = self.sock.recv(1024)
+                    #sys.stderr.write(data)
+                    self.buffer += data
+                except:
+                    print sys.exc_info()
+                    self.valid = False
+                    del threads[self.index]
+                    self.sock.close()
+                    break
+    
     def send(self, s):
         if self.valid:
             self.sock.send(str(s) + '\n')
