@@ -36,6 +36,7 @@ class ClientHandler(Thread):
                     continue
                 if s[0] == 'coordinator':
                     leader = int(s[1])
+                    wait_ack = False
                 elif s[0] == 'resp':
                     sys.stdout.write(s[1] + '\n')
                     sys.stdout.flush()
@@ -55,7 +56,7 @@ class ClientHandler(Thread):
                     del threads[self.index]
                     self.sock.close()
                     break
-    
+
     def send(self, s):
         if self.valid:
             self.sock.send(str(s) + '\n')
