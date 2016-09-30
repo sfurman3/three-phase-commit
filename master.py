@@ -68,12 +68,14 @@ class ClientHandler(Thread):
         except:
             pass
 
-def send(index, data):
+def send(index, data, set_wait_ack=False):
     global leader, live_list, threads, wait_ack
     wait = wait_ack
     while wait:
         time.sleep(0.01)
         wait = wait_ack
+    if set_wait_ack:
+        wait_ack = True
     pid = int(index)
     if pid >= 0:
         if pid not in threads:
@@ -134,11 +136,10 @@ def main():
             threads[pid] = handler
             handler.start()
         elif cmd == 'add' or cmd == 'delete' or cmd == 'get':
-            send(pid, sp1[1])
+            send(pid, sp1[1], set_wait_ack=True)
             for c in crash_later:
                 live_list[c] = False
             crash_later = []
-            wait_ack = True
         elif cmd == 'crash':
             send(pid, sp1[1])
             if pid == -1:
