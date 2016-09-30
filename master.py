@@ -88,7 +88,13 @@ def send(index, data):
     threads[pid].send(data)
 
 def exit():
-    global threads
+    global threads, wait_ack
+
+    wait = wait_ack
+    while wait:
+        time.sleep(0.01)
+        wait = wait_ack
+
     for k in threads:
         threads[k].close()
     subprocess.Popen(['./stopall'], stdout=open('/dev/null'), stderr=open('/dev/null'))
