@@ -130,7 +130,7 @@ def main():
             live_list[pid] = True
             subprocess.Popen(['./process', str(pid), sp2[2], sp2[3]], stdout=open('/dev/null'), stderr=open('/dev/null'))
             # sleep for a while to allow the process be ready
-            time.sleep(0.5)
+            time.sleep(1)
             # connect to the port of the pid
             handler = ClientHandler(pid, address, port)
             threads[pid] = handler
@@ -152,7 +152,7 @@ def main():
             crash_later.append(pid)
         elif cmd == 'vote':
             send(pid, sp1[1])
-        time.sleep(0.1)
+        time.sleep(1)
 
 if __name__ == '__main__':
     main()
