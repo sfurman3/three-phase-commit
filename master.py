@@ -97,6 +97,7 @@ def exit():
         time.sleep(0.01)
         wait = wait_ack
 
+    time.sleep(2)
     for k in threads:
         threads[k].close()
     subprocess.Popen(['./stopall'], stdout=open('/dev/null'), stderr=open('/dev/null'))
