@@ -136,7 +136,9 @@ def main():
             handler = ClientHandler(pid, address, port)
             threads[pid] = handler
             handler.start()
-        elif cmd == 'add' or cmd == 'delete' or cmd == 'get':
+        elif cmd == 'get':
+            send(pid, sp1[1], set_wait_ack=True)
+        elif cmd == 'add' or cmd == 'delete':
             send(pid, sp1[1], set_wait_ack=True)
             for c in crash_later:
                 live_list[c] = False
