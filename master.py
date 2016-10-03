@@ -74,19 +74,21 @@ def send(index, data, set_wait_ack=False):
     while wait:
         time.sleep(0.01)
         wait = wait_ack
-    if set_wait_ack:
-        wait_ack = True
     pid = int(index)
     if pid >= 0:
         if pid not in threads:
             print 'Master or testcase error!'
             return
+        if set_wait_ack:
+            wait_ack = True
         threads[pid].send(data)
         return
     pid = leader
     while pid not in live_list or live_list[pid] == False:
         time.sleep(0.01)
         pid = leader
+    if set_wait_ack:
+        wait_ack = True
     threads[pid].send(data)
 
 def exit():
