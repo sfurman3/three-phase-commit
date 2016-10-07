@@ -91,10 +91,11 @@ def send(index, data, set_wait_ack=False):
         wait_ack = True
     threads[pid].send(data)
 
-def exit():
+def exit(exit=False):
     global threads, wait_ack
 
     wait = wait_ack
+    wait = wait and (not exit)
     while wait:
         time.sleep(0.01)
         wait = wait_ack
@@ -106,8 +107,16 @@ def exit():
     time.sleep(0.1)
     os._exit(0)
 
+def timeout():
+    global wait_ack
+    time.sleep(120)
+    exit(True)
+
 def main():
     global leader, threads, crash_later, wait_ack
+    timeout_thread = Thread(target = timeout, args = ())
+    timeout_thread.start()
+
     while True:
         line = ''
         try:
