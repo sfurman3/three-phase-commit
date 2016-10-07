@@ -166,7 +166,7 @@ def main():
             crash_later.append(pid)
         elif cmd == 'vote':
             send(pid, sp1[1])
-        time.sleep(1)
+        time.sleep(2)
 
 if __name__ == '__main__':
     main()

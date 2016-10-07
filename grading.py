@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import os
+import os, time, sys
 from os.path import isfile, join
 import shutil
 
@@ -8,6 +8,8 @@ os.system('./build')
 
 test_output = 'test_output'
 tests = 'tests'
+if len(sys.argv) == 2:
+    tests = sys.argv[1]
 try:
     shutil.rmtree(test_output)
 except:
@@ -31,3 +33,4 @@ for f in os.listdir(tests):
                 print 'correct'
             else:
                 print 'wrong'
+            time.sleep(2)
