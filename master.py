@@ -122,7 +122,7 @@ def main():
         try:
             line = sys.stdin.readline()
         except: # keyboard exception, such as Ctrl+C/D
-            exit()
+            exit(True)
         if line == '': # end of a file
             exit()
         line = line.strip() # remove trailing '\n'
