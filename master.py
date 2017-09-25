@@ -3,33 +3,37 @@
 The master program for CS5414 three phase commit project.
 """
 
-import sys, os
+import os
+import signal
 import subprocess
+import sys
 import time
-from threading import Thread, Lock
 from socket import SOCK_STREAM, socket, AF_INET
+from threading import Thread
 
-leader = -1 # coordinator
+leader = -1  # coordinator
 address = 'localhost'
 threads = {}
 live_list = {}
 crash_later = []
 wait_ack = False
 
+
 class ClientHandler(Thread):
-    def __init__(self, index, address, port):
+    def __init__(self, index, address, port, process):
         Thread.__init__(self)
         self.index = index
         self.sock = socket(AF_INET, SOCK_STREAM)
         self.sock.connect((address, port))
         self.buffer = ""
         self.valid = True
+        self.process = process
 
     def run(self):
         global leader, threads, wait_ack
         while self.valid:
             if "\n" in self.buffer:
-                (l, rest) = self.buffer.split("\n",1)
+                (l, rest) = self.buffer.split("\n", 1)
                 self.buffer = rest
                 s = l.split()
                 if len(s) < 2:
@@ -48,7 +52,7 @@ class ClientHandler(Thread):
             else:
                 try:
                     data = self.sock.recv(1024)
-                    #sys.stderr.write(data)
+                    # sys.stderr.write(data)
                     self.buffer += data
                 except:
                     print sys.exc_info()
@@ -56,6 +60,11 @@ class ClientHandler(Thread):
                     del threads[self.index]
                     self.sock.close()
                     break
+
+    def kill(self):
+        if self.valid:
+            os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+            self.close()
 
     def send(self, s):
         if self.valid:
@@ -67,6 +76,7 @@ class ClientHandler(Thread):
             self.sock.close()
         except:
             pass
+
 
 def send(index, data, set_wait_ack=False):
     global leader, live_list, threads, wait_ack
@@ -91,6 +101,7 @@ def send(index, data, set_wait_ack=False):
         wait_ack = True
     threads[pid].send(data)
 
+
 def exit(exit=False):
     global threads, wait_ack
 
@@ -102,49 +113,52 @@ def exit(exit=False):
 
     time.sleep(2)
     for k in threads:
-        threads[k].close()
+        threads[k].kill()
     subprocess.Popen(['./stopall'], stdout=open('/dev/null'), stderr=open('/dev/null'))
     time.sleep(0.1)
     os._exit(0)
+
 
 def timeout():
     global wait_ack
     time.sleep(120)
     exit(True)
 
+
 def main():
     global leader, threads, crash_later, wait_ack
-    timeout_thread = Thread(target = timeout, args = ())
+    timeout_thread = Thread(target=timeout, args=())
     timeout_thread.start()
 
     while True:
         line = ''
         try:
             line = sys.stdin.readline()
-        except: # keyboard exception, such as Ctrl+C/D
+        except:  # keyboard exception, such as Ctrl+C/D
             exit(True)
-        if line == '': # end of a file
+        if line == '':  # end of a file
             exit()
-        line = line.strip() # remove trailing '\n'
-        if line == 'exit': # exit when reading 'exit' command
+        line = line.strip()  # remove trailing '\n'
+        if line == 'exit':  # exit when reading 'exit' command
             exit()
         sp1 = line.split(None, 1)
         sp2 = line.split()
-        if len(sp1) != 2: # validate input
+        if len(sp1) != 2:  # validate input
             continue
-        pid = int(sp2[0]) # first field is pid
-        cmd = sp2[1] # second field is command
+        pid = int(sp2[0])  # first field is pid
+        cmd = sp2[1]  # second field is command
         if cmd == 'start':
             port = int(sp2[3])
             # if no leader is assigned, set the first process as the leader
             if leader == -1:
                 leader = pid
             live_list[pid] = True
-            subprocess.Popen(['./process', str(pid), sp2[2], sp2[3]], stdout=open('/dev/null'), stderr=open('/dev/null'))
+            process = subprocess.Popen(['./process', str(pid), sp2[2], sp2[3]], stdout=open('/dev/null', 'w'),
+                stderr=open('/dev/null', 'w'), preexec_fn=os.setsid)
             # sleep for a while to allow the process be ready
             time.sleep(1)
             # connect to the port of the pid
-            handler = ClientHandler(pid, address, port)
+            handler = ClientHandler(pid, address, port, process)
             threads[pid] = handler
             handler.start()
         elif cmd == 'get':
@@ -167,6 +181,7 @@ def main():
         elif cmd == 'vote':
             send(pid, sp1[1])
         time.sleep(2)
+
 
 if __name__ == '__main__':
     main()
