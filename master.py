@@ -125,9 +125,10 @@ def timeout():
     exit(True)
 
 
-def main():
+def main(debug=False):
     global leader, threads, crash_later, wait_ack
     timeout_thread = Thread(target=timeout, args=())
+    timeout_thread.setDaemon(True)
     timeout_thread.start()
 
     while True:
@@ -141,11 +142,19 @@ def main():
         line = line.strip()  # remove trailing '\n'
         if line == 'exit':  # exit when reading 'exit' command
             exit()
+
         sp1 = line.split(None, 1)
         sp2 = line.split()
         if len(sp1) != 2:  # validate input
-            continue
-        pid = int(sp2[0])  # first field is pid
+            print "Invalid command: " + line
+            exit(True)
+
+        try:
+            pid = int(sp2[0])  # first field is pid
+        except ValueError:
+            print "Invalid pid: " + sp2[0]
+            exit(True)
+
         cmd = sp2[1]  # second field is command
         if cmd == 'start':
             port = int(sp2[3])
@@ -153,10 +162,16 @@ def main():
             if leader == -1:
                 leader = pid
             live_list[pid] = True
-            process = subprocess.Popen(['./process', str(pid), sp2[2], sp2[3]], stdout=open('/dev/null', 'w'),
-                stderr=open('/dev/null', 'w'), preexec_fn=os.setsid)
+
+            if debug:
+                process = subprocess.Popen(['./process', str(pid), sp2[2], sp2[3]], preexec_fn=os.setsid)
+            else:
+                process = subprocess.Popen(['./process', str(pid), sp2[2], sp2[3]], stdout=open('/dev/null', 'w'),
+                    stderr=open('/dev/null', 'w'), preexec_fn=os.setsid)
+
             # sleep for a while to allow the process be ready
-            time.sleep(1)
+            time.sleep(3)
+
             # connect to the port of the pid
             handler = ClientHandler(pid, address, port, process)
             threads[pid] = handler
@@ -184,4 +199,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    debug = False
+    if len(sys.argv) > 1 and sys.argv[1] == 'debug':
+        debug = True
+
+    main(debug)
