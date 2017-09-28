@@ -63,7 +63,10 @@ class ClientHandler(Thread):
 
     def kill(self):
         if self.valid:
-            os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+            try:
+                os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+            except:
+                pass
             self.close()
 
     def send(self, s):
