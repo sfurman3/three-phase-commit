@@ -37,12 +37,9 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -59,7 +56,7 @@ const (
 
 	// Maximum interval after the send timestamp of the last message
 	// received from a server for which the sender is considered alive
-	ALIVE_INTERVAL = 250 * time.Millisecond
+	ALIVE_INTERVAL = 200 * time.Millisecond
 
 	// Constants for printing error messages to the terminal
 	BOLD_RED = "\033[31;1m"
@@ -82,39 +79,9 @@ var (
 	LastTimestamp tsTimestampQueue
 )
 
-// Message represents a message sent from one server to another
-type Message struct {
-	Id      int       `json:"id"`  // server id
-	Rts     time.Time `json:"rts"` // real-time timestamp
-	Content string    `json:"msg"` // content of the message
-}
-
-// emptyMessage returns an empty message with a timestamp of time.Now()
-func emptyMessage() *Message {
-	return &Message{
-		Id:  ID,
-		Rts: time.Now(),
-	}
-}
-
-// newMessage returns a message with Content msg and a timestamp of time.Now()
-func newMessage(msg string) *Message {
-	return &Message{
-		Id:      ID,
-		Rts:     time.Now(),
-		Content: msg,
-	}
-}
-
 // init parses and validates command line arguments (by name or position) and
 // initializes global variables
 func init() {
-	flag.IntVar(&ID, "id", ID, "id of the server {0, ..., n-1}")
-	flag.IntVar(&NUM_PROCS, "n", NUM_PROCS, "total number of servers")
-	flag.IntVar(&MASTER_PORT, "port", MASTER_PORT, "number of the "+
-		"master-facing port")
-	flag.Parse()
-
 	setArgsPositional()
 
 	if NUM_PROCS <= 0 {
@@ -123,47 +90,6 @@ func init() {
 
 	PORT = START_PORT + ID
 	LastTimestamp.value = make([]time.Time, NUM_PROCS)
-}
-
-// setArgsPositional parses the first three command line arguments into ID,
-// NUM_PROCS, and PORT respectively. It should be called if no arguments were
-// provided via flags.
-func setArgsPositional() {
-	getIntArg := func(i int) int {
-		arg := flag.Arg(i)
-		if arg == "" {
-			fmt.Fprintf(os.Stderr, "%v: missing one or more "+
-				"arguments (there are %d)\n"+
-				"(e.g. \"%v 0 1 10000\" OR \"%v -id 0 -n 1 "+
-				"-port 10000)\"\n\n",
-				os.Args, len(REQUIRED_ARGUMENTS),
-				os.Args[0], os.Args[0])
-			flag.PrintDefaults()
-			os.Exit(1)
-		}
-		val, err := strconv.Atoi(arg)
-		if err != nil {
-			fmt.Fprintf(os.Stderr,
-				"could not parse: '%v' into an integer\n", arg)
-		}
-		return val
-	}
-
-	for idx, val := range REQUIRED_ARGUMENTS {
-		if *val == -1 {
-			*val = getIntArg(idx)
-		}
-	}
-}
-
-// Error logs the given error
-func Error(err ...interface{}) {
-	log.Println(ERROR + " " + fmt.Sprint(err...))
-}
-
-// Fail logs the given error and exits with status 1
-func Fatal(err ...interface{}) {
-	log.Fatalln(ERROR + " " + fmt.Sprint(err...))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -260,12 +186,15 @@ func serveMaster() {
 	}
 
 	masterConn, err := ln.Accept()
+	for err != nil {
+		masterConn, err = ln.Accept()
+	}
 	for {
 		if tcpConnIsClosed(masterConn) {
 			masterConn, err = ln.Accept()
-		}
-		if err != nil {
-			continue
+			for err != nil {
+				masterConn, err = ln.Accept()
+			}
 		}
 
 		handleMaster(masterConn)
