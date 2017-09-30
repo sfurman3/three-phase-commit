@@ -2,6 +2,9 @@
 process
 writeup_summary.md
 
+# vim swap files
+*.sw*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
