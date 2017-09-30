@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -70,13 +71,13 @@ var (
 	MASTER_PORT        = -1 // number of the master-facing port
 	REQUIRED_ARGUMENTS = []*int{&ID, &NUM_PROCS, &MASTER_PORT}
 
-	PORT = -1 // server's port number
+	PORT     = -1   // server's port number
+	DT_LOG   string // name of server's DT Log file
+	PLAYLIST string // name of server's playlist file
 
-	// struct containing all received messages in FIFO order
-	MessagesFIFO tsMsgQueue
-
-	// struct containing the timestamp of the last message from each server
-	LastTimestamp tsTimestampQueue
+	LocalPlaylist playlist         // in-memory copy of server's playlist
+	MessagesFIFO  tsMsgQueue       // all received messages in FIFO order
+	LastTimestamp tsTimestampQueue // timestamp of last message from each server
 )
 
 // init parses and validates command line arguments (by name or position) and
@@ -88,8 +89,26 @@ func init() {
 		Fatal("invalid number of servers: ", NUM_PROCS)
 	}
 
+	logDir := "logs"
+	playlistDir := "playlists"
+
 	PORT = START_PORT + ID
+	DT_LOG = fmt.Sprintf("%sdt_log_%0*d.log", logDir, len(os.Args[2]), ID)
+	PLAYLIST = fmt.Sprintf("%splaylist_%0*d.json",
+		playlistDir, len(os.Args[2]), ID)
+
+	var err error
+	LocalPlaylist, err = ReadPlaylist()
+	if err != nil {
+		Fatal(err)
+	}
+
 	LastTimestamp.value = make([]time.Time, NUM_PROCS)
+
+	// make directories for storing logs and playlists
+	fileMode := os.ModePerm | os.ModeDir
+	os.Mkdir(logDir, fileMode)
+	os.Mkdir(playlistDir, fileMode)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -216,24 +235,70 @@ func handleMaster(masterConn net.Conn) {
 		}
 
 		command = strings.TrimSpace(command)
-		switch command {
-		case "get":
-			writeMessages(master)
-		case "alive":
-			writeAlive(master)
-		default:
-			broadcastComm := "broadcast "
-			if !strings.HasPrefix(command, broadcastComm) {
-				Error("unrecognized command: \"", command, "\"")
-				continue
-			}
+		execute(masterConn, command)
+	}
+}
 
-			message := command[len(broadcastComm):]
-			broadcast(newMessage(message))
+func execute(conn net.Conn, command string) {
+	args := strings.Split(command, " ")
+	argLengthAtLeast := func(min int) bool {
+		if len(args) < min {
+			Error("not enough arguments to ",
+				args[0], " command: \"", command, "\"")
+			return false
+		}
+		return true
+	}
+
+	switch args[0] {
+	case "get":
+		if argLengthAtLeast(2) {
+			get(conn, args[1])
+		}
+	case "delete":
+		if argLengthAtLeast(2) {
+			deleteCoordinator(args[1:])
+		}
+	case "add":
+		if argLengthAtLeast(3) {
+			addCoordinator(args[1:])
+		}
+
+	case "crash":
+		crash()
+	case "crashAfterVote":
+		crashAfterVote()
+	case "crashBeforeVote":
+		crashBeforeVote()
+	case "crashAfterAck":
+		crashAfterAck()
+
+	default:
+		if len(args) == 1 {
+			switch args[0] {
+			case "crashVoteREQ":
+			case "crashPartialPreCommit":
+			case "crashPartialCommit":
+				crash()
+			default:
+				Error("unrecognized command: \"", command, "\"")
+			}
+		} else {
+			switch args[0] {
+			case "crashVoteREQ":
+				crashVoteREQ(args[1:])
+			case "crashPartialPreCommit":
+				crashPretialPreCommit(args[1:])
+			case "crashPartialCommit":
+				crashPartialCommit(args[1:])
+			default:
+				Error("unrecognized command: \"", command, "\"")
+			}
 		}
 	}
 }
 
+// TODO: Delete?
 func writeMessages(rwr *bufio.ReadWriter) {
 	rwr.WriteString("messages ")
 	MessagesFIFO.WriteMessages(rwr)
@@ -245,6 +310,7 @@ func writeMessages(rwr *bufio.ReadWriter) {
 	}
 }
 
+// TODO: Delete?
 func writeAlive(rwr *bufio.ReadWriter) {
 	now := time.Now()
 
@@ -333,3 +399,46 @@ func tcpConnIsClosed(conn net.Conn) bool {
 
 	return false
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// coordinator								     //
+///////////////////////////////////////////////////////////////////////////////
+
+// TODO
+func addCoordinator(args []string)    {}
+func deleteCoordinator(args []string) {}
+
+///////////////////////////////////////////////////////////////////////////////
+// participant								     //
+///////////////////////////////////////////////////////////////////////////////
+
+// TODO
+func get(conn net.Conn, song string) {
+	url := LocalPlaylist.GetSong(song)
+	fmt.Fprintln(conn, "resp", url)
+}
+
+func addParticipant(song, url string) {
+	LocalPlaylist.AddOrUpdateSong(song, url)
+	LocalPlaylist.WritePlaylist()
+}
+
+func deleteParticipant(song, url string) {
+	LocalPlaylist.DeleteSong(song, url)
+	LocalPlaylist.WritePlaylist()
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// crash      								     //
+///////////////////////////////////////////////////////////////////////////////
+
+func crash() {
+	Fatal("CRASH")
+}
+
+func crashAfterVote()                     {}
+func crashBeforeVote()                    {}
+func crashAfterAck()                      {}
+func crashVoteREQ(args []string)          {}
+func crashPretialPreCommit(args []string) {}
+func crashPartialCommit(args []string)    {}
