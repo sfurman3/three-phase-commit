@@ -350,32 +350,42 @@ func sendMarshaled(msg string, id int) error {
 	return err
 }
 
-func sendAndWaitForResponse(msg string, id int) (string, error) {
+// sendAndWaitForResponse takes a Message marshaled into JSON and tries to send
+// it to the server with the given id. Returns the response with any leading or
+// trailing whitespace removed.
+//
+// Returns an error whose value is "timeout" if the recipient fails to respond
+// within a period of TIMEOUT.
+//
+// Returns an error whose value is "empty response" if the recipient sends an
+// empty response.
+func sendAndWaitForResponse(msg string, id int) ([]byte, error) {
 	conn, err := net.Dial("tcp", ":"+strconv.Itoa(START_PORT+id))
 	if err != nil {
-		if netErr := err.(net.Error); netErr.Timeout() {
-			return "", errors.New("timeout")
-		}
-		return "", err
+		return nil, err
 	}
 	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(TIMEOUT))
 
 	_, err = fmt.Fprintln(conn, msg)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	r := bufio.NewReader(conn)
 	resp, err := r.ReadBytes('\n')
 	if err != nil {
-		return "", err
+		if netErr := err.(net.Error); netErr.Timeout() {
+			return nil, errors.New("timeout")
+		}
+		return nil, err
 	}
 
 	if resp == nil {
-		return "", errors.New("empty response")
+		return nil, errors.New("empty response")
 	}
 
-	return string(bytes.TrimSpace(resp)), nil
+	return bytes.TrimSpace(resp), nil
 }
 
 func tcpConnIsClosed(conn net.Conn) bool {

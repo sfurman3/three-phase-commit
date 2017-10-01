@@ -151,11 +151,18 @@ func getCoordinator(conn net.Conn, song string) {
 				continue
 			}
 
-			args := strings.Split(resp, " ")
+			args := strings.Split(string(resp), " ")
 			if len(args) >= 2 {
 				if args[0] == "resp" && args[1] != "NONE" {
 					url = string(args[1])
 					LocalPlaylist.AddOrUpdateSong(song, url)
+					// TODO: Write the new value to the DT
+					// log?
+					//
+					// MAYBE NOT because you might get a
+					// value that is about to be removed in
+					// a current commit and then you'll
+					// create an inconsistent state
 					break
 				}
 			}
