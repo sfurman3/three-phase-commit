@@ -18,6 +18,7 @@ func NewPlaylist() playlist {
 	}
 }
 
+// TODO: avoid writing playlist to file? write data in DT log?
 func ReadPlaylist() (playlist, error) {
 	var p playlist
 	pFile := ""

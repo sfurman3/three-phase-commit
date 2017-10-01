@@ -46,26 +46,52 @@ func (tsq *tsTimestampQueue) UpdateTimestamp(msg *Message) {
 
 func (tsq *tsTimestampQueue) WriteAlive(rwr *bufio.ReadWriter, now time.Time) {
 	LastTimestamp.mutex.Lock()
-	{
-		stmps := LastTimestamp.value
-		for id := 0; id < ID; id++ {
-			// add all server ids for which a
-			// heartbeat was sent within the
-			// alive interval
-			if now.Sub(stmps[id]) < ALIVE_INTERVAL {
-				rwr.WriteString(strconv.Itoa(id))
-				rwr.WriteByte(',')
-			}
+	stmps := LastTimestamp.value
+	for id := 0; id < ID; id++ {
+		// add all server ids for which a
+		// heartbeat was sent within the
+		// alive interval
+		if now.Sub(stmps[id]) < ALIVE_INTERVAL {
+			rwr.WriteString(strconv.Itoa(id))
+			rwr.WriteByte(',')
 		}
-		rwr.WriteString(strconv.Itoa(ID))
-		for id := ID + 1; id < NUM_PROCS; id++ {
-			// add all server ids for which a
-			// heartbeat was sent within the
-			// heartbeat interval
-			if now.Sub(stmps[id]) < HEARTBEAT_INTERVAL {
-				rwr.WriteByte(',')
-				rwr.WriteString(strconv.Itoa(id))
-			}
+	}
+	rwr.WriteString(strconv.Itoa(ID))
+	for id := ID + 1; id < NUM_PROCS; id++ {
+		// add all server ids for which a
+		// heartbeat was sent within the
+		// heartbeat interval
+		if now.Sub(stmps[id]) < HEARTBEAT_INTERVAL {
+			rwr.WriteByte(',')
+			rwr.WriteString(strconv.Itoa(id))
+		}
+	}
+	LastTimestamp.mutex.Unlock()
+}
+
+func (tsq *tsTimestampQueue) GetAlive(alive []bool, now time.Time) {
+	LastTimestamp.mutex.Lock()
+
+	stmps := LastTimestamp.value
+	for id := 0; id < ID; id++ {
+		// add all server ids for which a
+		// heartbeat was sent within the
+		// alive interval
+		if now.Sub(stmps[id]) < ALIVE_INTERVAL {
+			alive[id] = true
+		} else {
+			alive[id] = false
+		}
+	}
+	alive[ID] = true
+	for id := ID + 1; id < NUM_PROCS; id++ {
+		// add all server ids for which a
+		// heartbeat was sent within the
+		// alive interval
+		if now.Sub(stmps[id]) < ALIVE_INTERVAL {
+			alive[id] = true
+		} else {
+			alive[id] = false
 		}
 	}
 	LastTimestamp.mutex.Unlock()
