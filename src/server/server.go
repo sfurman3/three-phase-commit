@@ -40,7 +40,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"strconv"
@@ -76,12 +75,14 @@ var (
 	MASTER_PORT        = -1 // number of the master-facing port
 	REQUIRED_ARGUMENTS = []*int{&ID, &NUM_PROCS, &MASTER_PORT}
 
-	PORT   = -1   // server's port number
-	DT_LOG string // name of server's DT Log file
+	PORT        = -1   // server's port number
+	COORDINATOR = -1   // coordinator's id number
+	DT_LOG      string // name of server's DT Log file
 
-	LocalPlaylist playlist         // in-memory copy of server's playlist
-	MessagesFIFO  tsMsgQueue       // all received messages in FIFO order
-	LastTimestamp tsTimestampQueue // timestamp of last message from each server
+	LocalPlaylist    playlist         // in-memory copy of server's playlist
+	MessagesFIFO     tsMsgQueue       // all received messages in FIFO order
+	LastTimestamp    tsTimestampQueue // timestamp of last message from each server
+	MessagesToMaster tsStringQueue    // pending messages to master
 )
 
 // init parses and validates command line arguments (by name or position) and
@@ -121,9 +122,24 @@ func main() {
 // heartbeat sleeps for HEARTBEAT_INTERVAL and broadcasts an empty message to
 // every server to indicate that the server is still alive
 func heartbeat() {
+	go broadcast(emptyMessage())
+	time.Sleep(HEARTBEAT_INTERVAL)
+
+	if COORDINATOR == -1 && LastTimestamp.LowestIdAlive() == ID {
+		// no server has been elected coordinator and this process has the
+		// lowest id
+		//
+		// NOTE: if this server is recovering from a failure, then
+		// another is already coordinator
+		COORDINATOR = ID
+
+		// tell the master that this server is the coordinator
+		MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
+	}
+
 	for {
-		time.Sleep(HEARTBEAT_INTERVAL)
 		go broadcast(emptyMessage())
+		time.Sleep(HEARTBEAT_INTERVAL)
 	}
 }
 
@@ -180,6 +196,9 @@ func handleMessage(conn net.Conn) {
 	// Update the heartbeat metadata
 	// NOTE: assumes message IDs are in {0..n-1}
 	LastTimestamp.UpdateTimestamp(msg)
+	if COORDINATOR == -1 && msg.coordinator != -1 {
+		COORDINATOR = msg.coordinator
+	}
 
 	if len(msg.Content) == 0 { // msg is an empty message
 		return
@@ -221,16 +240,10 @@ func serveMaster() {
 			strconv.Itoa(MASTER_PORT))
 	}
 
-	masterConn, err := ln.Accept()
-	for err != nil {
-		masterConn, err = ln.Accept()
-	}
 	for {
-		if tcpConnIsClosed(masterConn) {
-			masterConn, err = ln.Accept()
-			for err != nil {
-				masterConn, err = ln.Accept()
-			}
+		masterConn, err := ln.Accept()
+		if err != nil {
+			continue
 		}
 
 		handleMaster(masterConn)
@@ -240,13 +253,26 @@ func serveMaster() {
 // handleMaster executes commands from the master process and responds with any
 // requested data
 func handleMaster(masterConn net.Conn) {
-	master := bufio.NewReadWriter(
-		bufio.NewReader(masterConn),
-		bufio.NewWriter(masterConn))
+	defer masterConn.Close()
+	master := bufio.NewReader(bufio.NewReader(masterConn))
 
 	for {
+		// send the next pending message to master
+		msg := MessagesToMaster.Dequeue()
+		if msg != "" {
+			if _, err := fmt.Fprintln(masterConn, msg); err != nil {
+				MessagesToMaster.PushFront(msg)
+			}
+		}
+
+		// check for a new command from master
+		masterConn.SetReadDeadline(time.Now().Add(TIMEOUT))
 		command, err := master.ReadString('\n')
 		if err != nil {
+			netErr, ok := err.(net.Error)
+			if ok && netErr.Timeout() {
+				continue
+			}
 			// connection to master lost
 			return
 		}
@@ -385,14 +411,4 @@ func sendAndWaitForResponse(msg string, id int) ([]byte, error) {
 	}
 
 	return bytes.TrimSpace(resp), nil
-}
-
-func tcpConnIsClosed(conn net.Conn) bool {
-	one := []byte{}
-	if _, err := conn.Read(one); err == io.EOF {
-		conn.Close()
-		return true
-	}
-
-	return false
 }
