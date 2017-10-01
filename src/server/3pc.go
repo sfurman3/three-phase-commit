@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -20,7 +21,7 @@ func execute(conn net.Conn, command string) {
 	switch args[0] {
 	case "get":
 		if argLengthAtLeast(2) {
-			get(conn, args[1])
+			getCoordinator(conn, args[1])
 		}
 	case "delete":
 		if argLengthAtLeast(2) {
@@ -126,6 +127,45 @@ func recoverFromFailure() {
 ///////////////////////////////////////////////////////////////////////////////
 
 // TODO
+func getCoordinator(conn net.Conn, song string) {
+	// check the local playlist
+	url := LocalPlaylist.GetSongUrl(song)
+
+	// ask other servers for the song url (if this server doesn't have it)
+	if url == "NONE" {
+		m := newMessage("get " + song)
+		mBytes, err := json.Marshal(m)
+		if err != nil {
+			Error("failed to create message: \"", "get ", song, "\"")
+			return
+		}
+		mJson := string(mBytes)
+
+		for id := 0; id < NUM_PROCS; id++ {
+			if id == ID {
+				continue
+			}
+
+			resp, err := sendAndWaitForResponse(mJson, id)
+			if err != nil {
+				continue
+			}
+
+			args := strings.Split(resp, " ")
+			if len(args) >= 2 {
+				if args[0] == "resp" && args[1] != "NONE" {
+					url = string(args[1])
+					LocalPlaylist.AddOrUpdateSong(song, url)
+					break
+				}
+			}
+		}
+	}
+
+	fmt.Fprintln(conn, "resp", url)
+}
+
+// TODO
 func addCoordinator(args []string)    {}
 func deleteCoordinator(args []string) {}
 
@@ -133,9 +173,8 @@ func deleteCoordinator(args []string) {}
 // participant								     //
 ///////////////////////////////////////////////////////////////////////////////
 
-// TODO
-func get(conn net.Conn, song string) {
-	url := LocalPlaylist.GetSong(song)
+func getParticipant(conn net.Conn, song string) {
+	url := LocalPlaylist.GetSongUrl(song)
 	fmt.Fprintln(conn, "resp", url)
 }
 

@@ -36,7 +36,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -58,6 +60,9 @@ const (
 	// Maximum interval after the send timestamp of the last message
 	// received from a server for which the sender is considered alive
 	ALIVE_INTERVAL = 200 * time.Millisecond
+
+	// Timeout for waiting for a response from the coordinator
+	TIMEOUT = 10 * time.Millisecond
 
 	// Constants for printing error messages to the terminal
 	BOLD_RED = "\033[31;1m"
@@ -182,6 +187,27 @@ func handleMessage(conn net.Conn) {
 		return
 	}
 
+	args := strings.Split(msg.Content, " ")
+	argLengthAtLeast := func(min int) bool {
+		if len(args) < min {
+			Error("not enough arguments to ",
+				args[0], " command: \"", msg.Content, "\"")
+			return false
+		}
+		return true
+	}
+
+	m := strings.Split(msg.Content, " ")
+	switch m[0] {
+	case "get":
+		if argLengthAtLeast(2) {
+			getParticipant(conn, args[1])
+		}
+	default:
+		// TODO
+	}
+
+	// TODO: REMOVE
 	MessagesFIFO.Enqueue(msg)
 }
 
@@ -299,7 +325,7 @@ func broadcast(msg *Message) {
 			continue
 		}
 
-		send(msgJSON, id)
+		sendMarshaled(msgJSON, id)
 	}
 }
 
@@ -307,8 +333,8 @@ func broadcast(msg *Message) {
 //
 // establishes a connection with the server if none exists and reestablishes
 // one if
-func send(msg string, id int) error {
-	// NOTE: In the future, you may want to consider using
+func sendMarshaled(msg string, id int) error {
+	// TODO: In the future, you may want to consider using
 	// net.DialTimeout (e.g. the recipient is so busy it cannot
 	// service the send in a reasonable amount of time) and/or
 	// consider starting a new thread for every send to prevent
@@ -322,6 +348,34 @@ func send(msg string, id int) error {
 
 	_, err = fmt.Fprintln(conn, msg)
 	return err
+}
+
+func sendAndWaitForResponse(msg string, id int) (string, error) {
+	conn, err := net.Dial("tcp", ":"+strconv.Itoa(START_PORT+id))
+	if err != nil {
+		if netErr := err.(net.Error); netErr.Timeout() {
+			return "", errors.New("timeout")
+		}
+		return "", err
+	}
+	defer conn.Close()
+
+	_, err = fmt.Fprintln(conn, msg)
+	if err != nil {
+		return "", err
+	}
+
+	r := bufio.NewReader(conn)
+	resp, err := r.ReadBytes('\n')
+	if err != nil {
+		return "", err
+	}
+
+	if resp == nil {
+		return "", errors.New("empty response")
+	}
+
+	return string(bytes.TrimSpace(resp)), nil
 }
 
 func tcpConnIsClosed(conn net.Conn) bool {

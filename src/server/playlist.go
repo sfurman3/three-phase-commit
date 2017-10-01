@@ -42,7 +42,7 @@ func ReadPlaylist() (playlist, error) {
 	return p, err
 }
 
-func (p *playlist) GetSong(song string) string {
+func (p *playlist) GetSongUrl(song string) string {
 	p.mutex.Lock()
 	url, ok := p.value[song]
 	p.mutex.Unlock()
