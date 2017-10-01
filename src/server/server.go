@@ -94,7 +94,6 @@ func init() {
 	}
 
 	logDir := "logs"
-	playlistDir := "playlists"
 
 	PORT = START_PORT + ID
 	DT_LOG = fmt.Sprintf("%sdt_log_%0*d.log", logDir, len(os.Args[2]), ID)
@@ -106,7 +105,6 @@ func init() {
 	// make directories for storing logs and playlists
 	fileMode := os.ModePerm | os.ModeDir
 	os.Mkdir(logDir, fileMode)
-	os.Mkdir(playlistDir, fileMode)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -376,6 +374,7 @@ func sendAndWaitForResponse(msg string, id int) ([]byte, error) {
 	resp, err := r.ReadBytes('\n')
 	if err != nil {
 		if netErr := err.(net.Error); netErr.Timeout() {
+			// TODO: Update UP set?
 			return nil, errors.New("timeout")
 		}
 		return nil, err
