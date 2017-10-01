@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"io/ioutil"
 	"os"
 	"sync"
@@ -18,27 +20,13 @@ func NewPlaylist() playlist {
 	}
 }
 
-// TODO: avoid writing playlist to file? write data in DT log?
 func ReadPlaylist() (playlist, error) {
 	var p playlist
-	pFile := ""
-	backup := PLAYLIST + ".backup"
-	if _, err := os.Stat(backup); !os.IsNotExist(err) {
-		Error("server failed to finish last update to %s", PLAYLIST)
-		os.Remove(PLAYLIST)
-		os.Rename(backup, PLAYLIST)
-		pFile = backup
-	} else {
-		if _, err := os.Stat(PLAYLIST); !os.IsNotExist(err) {
-			pFile = PLAYLIST
-		}
+	if _, err := os.Stat(DT_LOG); os.IsNotExist(err) {
+		return playlist{}, errors.New("no backup")
 	}
 
-	if pFile == "" {
-		return NewPlaylist(), nil
-	}
-
-	f, err := os.Open(pFile)
+	f, err := os.Open(DT_LOG)
 	if err != nil {
 		return p, err
 	}
@@ -47,6 +35,8 @@ func ReadPlaylist() (playlist, error) {
 	if err != nil {
 		return p, err
 	}
+
+	// TODO: Read each entry from the DT log
 
 	err = json.Unmarshal(b, &p.value)
 	return p, err
@@ -68,6 +58,7 @@ func (p *playlist) AddOrUpdateSong(song, url string) {
 	p.mutex.Lock()
 	p.value[song] = url
 	p.mutex.Unlock()
+	// TODO: write to DT log?
 }
 
 func (p *playlist) DeleteSong(song, url string) {
@@ -76,17 +67,10 @@ func (p *playlist) DeleteSong(song, url string) {
 	p.mutex.Unlock()
 }
 
-func (p *playlist) WritePlaylist() {
+func (p *playlist) WritePlaylist(w io.Writer) {
 	p.mutex.Lock()
 	playlistJson, _ := json.Marshal(p.value)
 	p.mutex.Unlock()
 
-	backup := PLAYLIST + ".backup"
-	os.Rename(PLAYLIST, backup)
-
-	file, _ := os.Create(PLAYLIST)
-	defer file.Close()
-
-	file.Write(playlistJson)
-	os.Remove(backup)
+	w.Write(playlistJson)
 }

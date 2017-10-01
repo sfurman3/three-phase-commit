@@ -71,9 +71,8 @@ var (
 	MASTER_PORT        = -1 // number of the master-facing port
 	REQUIRED_ARGUMENTS = []*int{&ID, &NUM_PROCS, &MASTER_PORT}
 
-	PORT     = -1   // server's port number
-	DT_LOG   string // name of server's DT Log file
-	PLAYLIST string // name of server's playlist file
+	PORT   = -1   // server's port number
+	DT_LOG string // name of server's DT Log file
 
 	LocalPlaylist playlist         // in-memory copy of server's playlist
 	MessagesFIFO  tsMsgQueue       // all received messages in FIFO order
@@ -94,14 +93,8 @@ func init() {
 
 	PORT = START_PORT + ID
 	DT_LOG = fmt.Sprintf("%sdt_log_%0*d.log", logDir, len(os.Args[2]), ID)
-	PLAYLIST = fmt.Sprintf("%splaylist_%0*d.json",
-		playlistDir, len(os.Args[2]), ID)
 
-	var err error
-	LocalPlaylist, err = ReadPlaylist()
-	if err != nil {
-		Fatal(err)
-	}
+	LocalPlaylist = NewPlaylist()
 
 	LastTimestamp.value = make([]time.Time, NUM_PROCS)
 

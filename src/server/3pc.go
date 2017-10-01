@@ -141,12 +141,10 @@ func get(conn net.Conn, song string) {
 
 func addParticipant(song, url string) {
 	LocalPlaylist.AddOrUpdateSong(song, url)
-	LocalPlaylist.WritePlaylist()
 }
 
 func deleteParticipant(song, url string) {
 	LocalPlaylist.DeleteSong(song, url)
-	LocalPlaylist.WritePlaylist()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
