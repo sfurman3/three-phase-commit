@@ -61,7 +61,7 @@ func (p *playlist) AddOrUpdateSong(song, url string) {
 	// TODO: write to DT log?
 }
 
-func (p *playlist) DeleteSong(song, url string) {
+func (p *playlist) DeleteSong(song string) {
 	p.mutex.Lock()
 	delete(p.value, song)
 	p.mutex.Unlock()

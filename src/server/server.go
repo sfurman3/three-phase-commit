@@ -97,7 +97,7 @@ func init() {
 	logDir := "logs"
 
 	PORT = START_PORT + ID
-	DT_LOG = fmt.Sprintf("%sdt_log_%0*d.log", logDir, len(os.Args[2]), ID)
+	DT_LOG = fmt.Sprintf("%s/dt_log_%0*d.log", logDir, len(os.Args[2]), ID)
 
 	LocalPlaylist = NewPlaylist()
 
@@ -182,12 +182,12 @@ func handleMessage(conn net.Conn) {
 	defer conn.Close()
 
 	messenger := bufio.NewReader(conn)
-	msg := new(Message)
 	msgBytes, err := messenger.ReadBytes('\n')
 	if err != nil {
 		return
 	}
 
+	msg := new(Message)
 	err = json.Unmarshal(msgBytes, msg)
 	if err != nil {
 		return
@@ -219,6 +219,21 @@ func handleMessage(conn net.Conn) {
 	case "get":
 		if argLengthAtLeast(2) {
 			getParticipant(conn, args[1])
+		}
+	case "vote-req":
+		if argLengthAtLeast(4) {
+			if args[1] == "add" {
+				addParticipant(conn, args[2], args[3])
+			} else {
+				Error("no such vote-req operation: \"", args[1], "\"")
+			}
+		}
+		if argLengthAtLeast(3) {
+			if args[1] == "delete" {
+				deleteParticipant(conn, args[2])
+			} else {
+				Error("no such vote-req operation: \"", args[1], "\"")
+			}
 		}
 	default:
 		// TODO
@@ -257,6 +272,9 @@ func handleMaster(masterConn net.Conn) {
 	master := bufio.NewReader(bufio.NewReader(masterConn))
 
 	for {
+		// TODO: replace with direct writes to master connection in child
+		// calls
+		//
 		// send the next pending message to master
 		msg := MessagesToMaster.Dequeue()
 		if msg != "" {
@@ -354,9 +372,6 @@ func broadcast(msg *Message) {
 }
 
 // send a message to the server with the given id
-//
-// establishes a connection with the server if none exists and reestablishes
-// one if
 func sendMarshaled(msg string, id int) error {
 	// TODO: In the future, you may want to consider using
 	// net.DialTimeout (e.g. the recipient is so busy it cannot

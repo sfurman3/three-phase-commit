@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func execute(conn net.Conn, command string) {
@@ -24,11 +28,13 @@ func execute(conn net.Conn, command string) {
 			getCoordinator(conn, args[1])
 		}
 	case "delete":
-		if argLengthAtLeast(2) {
+		// TODO: maybe remove COORDINATOR check
+		if COORDINATOR == ID && argLengthAtLeast(2) {
 			deleteCoordinator(args[1:])
 		}
 	case "add":
-		if argLengthAtLeast(3) {
+		// TODO: maybe remove COORDINATOR check
+		if COORDINATOR == ID && argLengthAtLeast(3) {
 			addCoordinator(args[1:])
 		}
 
@@ -127,6 +133,12 @@ func recoverFromFailure() {
 ///////////////////////////////////////////////////////////////////////////////
 
 // TODO
+type response struct {
+	v  string
+	id int
+}
+
+// TODO
 func getCoordinator(conn net.Conn, song string) {
 	// check the local playlist
 	url := LocalPlaylist.GetSongUrl(song)
@@ -173,8 +185,310 @@ func getCoordinator(conn net.Conn, song string) {
 }
 
 // TODO
-func addCoordinator(args []string)    {}
-func deleteCoordinator(args []string) {}
+func addCoordinator(args []string) {
+	song := args[0]
+	url := args[1]
+	coordinatorVote := vote(url)
+
+	// TODO: maybe write start-3pc first
+	// abort immediately if the coordinator votes no
+	if coordinatorVote == "no" {
+		MessagesToMaster.Enqueue("ack abort")
+		return
+	}
+
+	// write start-3pc record in DT log
+	writeToDtLog("start-3pc add", song, url)
+
+	// send VOTE-REQ to all participants
+	// AND wait for vote messages from all participants
+	resps, timeout := broadcastToParticipantsAndAwaitResponses(
+		fmt.Sprintf("vote-req add %s %s", song, url))
+	if timeout {
+		// write abort record in DT log
+		writeToDtLog("abort")
+
+		// send abort to all processes that voted yes
+		sendAbortToYesVoters(resps)
+
+		// send abort to master
+		MessagesToMaster.Enqueue("ack abort")
+		return
+	}
+
+	// check that all participants voted yes
+	allVotedYes := true
+	for _, resp := range resps {
+		if resp.v != "yes" {
+			allVotedYes = false
+			break
+		}
+	}
+
+	if allVotedYes {
+		// send pre-commit to all participants
+		sendToParticipantsAndAwaitAcks(resps, "pre-commit")
+
+		// write commit record to DT log
+		writeToDtLog("commit")
+
+		// send commit to all participants
+		sendToParticipantsAndAwaitAcks(resps, "commit")
+
+		// send commit to master
+		MessagesToMaster.Enqueue("ack commit")
+
+		// add song to local playlist
+		LocalPlaylist.AddOrUpdateSong(song, url)
+	} else {
+		// some participant voted no
+
+		// write abort record in DT log
+		writeToDtLog("abort")
+
+		// send abort to all processes that voted yes
+		sendAbortToYesVoters(resps)
+
+		// send abort to master
+		MessagesToMaster.Enqueue("ack abort")
+	}
+
+	return
+}
+
+// TODO
+func deleteCoordinator(args []string) {
+	song := args[0]
+
+	// write start-3pc record in DT log
+	writeToDtLog("start-3pc delete", song)
+
+	// send VOTE-REQ to all participants
+	// AND wait for vote messages from all participants
+	resps, timeout := broadcastToParticipantsAndAwaitResponses(
+		"vote-req delete " + song)
+	if timeout {
+		// write abort record in DT log
+		writeToDtLog("abort")
+
+		// send abort to all processes that voted yes
+		sendAbortToYesVoters(resps)
+
+		// send abort to master
+		MessagesToMaster.Enqueue("ack abort")
+		return
+	}
+
+	// check that all participants voted yes
+	allVotedYes := true
+	for _, resp := range resps {
+		if resp.v != "yes" {
+			allVotedYes = false
+			break
+		}
+	}
+
+	if allVotedYes {
+		// send pre-commit to all participants
+		sendToParticipantsAndAwaitAcks(resps, "pre-commit")
+
+		// write commit record to DT log
+		writeToDtLog("commit")
+
+		// send commit to all participants
+		sendToParticipantsAndAwaitAcks(resps, "commit")
+
+		// send commit to master
+		MessagesToMaster.Enqueue("ack commit")
+
+		// add song to local playlist
+		LocalPlaylist.DeleteSong(song)
+	} else {
+		// some participant voted no
+
+		// write abort record in DT log
+		writeToDtLog("abort")
+
+		// send abort to all processes that voted yes
+		sendAbortToYesVoters(resps)
+
+		// send abort to master
+		MessagesToMaster.Enqueue("ack abort")
+	}
+
+	return
+}
+
+func updateCoordinator(update string, args []string) {
+	song := args[0]
+	url := args[1]
+	coordinatorVote := vote(url)
+	operation := update + " " + song + " " + url
+
+	// abort immediately if the coordinator votes no
+	if coordinatorVote == "no" {
+		MessagesToMaster.Enqueue("ack abort")
+		return
+	}
+
+	// write start-3pc record in DT log
+	writeToDtLog("start-3pc", operation)
+
+	// send VOTE-REQ to all participants
+	// AND wait for vote messages from all participants
+	resps, timeout := broadcastToParticipantsAndAwaitResponses(
+		fmt.Sprintf("vote-req %s", operation))
+	if timeout {
+		// write abort record in DT log
+		writeToDtLog("abort")
+
+		// send abort to all processes that voted yes
+		sendAbortToYesVoters(resps)
+
+		// send abort to master
+		MessagesToMaster.Enqueue("ack abort")
+		return
+	}
+
+	// check that all participants voted yes
+	allVotedYes := true
+	for _, resp := range resps {
+		if resp.v != "yes" {
+			allVotedYes = false
+			break
+		}
+	}
+
+	if allVotedYes {
+		// TODO: send pre-commit to all participants
+		sendToParticipantsAndAwaitAcks(resps, "pre-commit")
+
+		// write commit record to DT log
+		writeToDtLog("commit")
+
+		// send commit to all participants
+		sendToParticipantsAndAwaitAcks(resps, "commit")
+
+		// send abort to master
+		MessagesToMaster.Enqueue("ack commit")
+
+		// add song to local playlist
+		LocalPlaylist.AddOrUpdateSong(song, url)
+	} else {
+		// some participant voted no
+
+		// write abort record in DT log
+		writeToDtLog("abort")
+
+		// send abort to all processes that voted yes
+		sendAbortToYesVoters(resps)
+
+		// send abort to master
+		MessagesToMaster.Enqueue("ack abort")
+	}
+
+	return
+}
+
+func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, bool) {
+	type connection struct {
+		c  net.Conn
+		id int
+	}
+
+	var responses []response
+	var conns []connection
+	timeout := false
+
+	msgBytes, err := json.Marshal(newMessage(msg))
+	if err != nil {
+		return nil, timeout
+	}
+	msgJSON := string(msgBytes)
+
+	// send message to participants
+	for id := 0; id < NUM_PROCS; id++ {
+		if id == ID {
+			continue
+		}
+
+		conn, err := net.Dial("tcp", ":"+strconv.Itoa(START_PORT+id))
+		defer conn.Close()
+		if err == nil {
+			_, err = fmt.Fprintln(conn, msgJSON)
+			if err == nil {
+				conns = append(conns, connection{conn, id})
+			}
+		}
+	}
+
+	// wait for responses from all recipients
+	for _, conn := range conns {
+		conn.c.SetDeadline(time.Now().Add(TIMEOUT))
+		r := bufio.NewReader(conn.c)
+		resp, err := r.ReadString('\n')
+		if err == nil {
+			responses = append(responses, response{resp, conn.id})
+		} else {
+			timeout = true
+		}
+	}
+
+	return responses, timeout
+}
+
+func sendAbortToYesVoters(resps []response) {
+	abortBytes, err := json.Marshal(newMessage("abort"))
+	if err != nil {
+		Error("failed to marshal \"abort\" into message")
+		return
+	}
+	abortJson := string(abortBytes)
+	for _, resp := range resps {
+		if resp.v == "yes" {
+			// TODO: send abort
+			conn, err := net.Dial("tcp", ":"+strconv.Itoa(START_PORT+resp.id))
+			defer conn.Close()
+			if err == nil {
+				fmt.Fprintln(conn, abortJson)
+			}
+		}
+	}
+}
+
+func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
+	var conns []net.Conn
+	msgBytes, err := json.Marshal(newMessage(msg))
+	if err != nil {
+		return
+	}
+	msgJSON := string(msgBytes)
+
+	// send message to participants
+	for _, ptc := range participants {
+		if ptc.id == ID {
+			continue
+		}
+
+		conn, err := net.Dial("tcp", ":"+strconv.Itoa(START_PORT+ptc.id))
+		defer conn.Close()
+		if err == nil {
+			_, err = fmt.Fprintln(conn, msgJSON)
+			if err == nil {
+				conns = append(conns, conn)
+			}
+		}
+	}
+
+	// wait for responses from all recipients
+	for _, conn := range conns {
+		conn.SetDeadline(time.Now().Add(TIMEOUT))
+		r := bufio.NewReader(conn)
+
+		// read ack from recipient
+		r.ReadString('\n')
+	}
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // participant								     //
@@ -185,12 +499,146 @@ func getParticipant(conn net.Conn, song string) {
 	fmt.Fprintln(conn, "resp", url)
 }
 
-func addParticipant(song, url string) {
-	LocalPlaylist.AddOrUpdateSong(song, url)
+func addParticipant(conn net.Conn, song, url string) {
+	vote := vote(url)
+	if vote == "yes" {
+		// write yes record in DT log
+		writeToDtLog("yes add", song, url)
+
+		// vote yes
+		fmt.Fprintln(conn, "yes")
+
+		// wait for message from coordinator
+		msg, timeout := waitForMessageFromCoordinator(conn)
+		if timeout {
+			initiateElectionProtocol()
+			return
+		}
+
+		if msg == "pre-commit" {
+			// send ack to coordinator
+			fmt.Fprintln(conn, "ack")
+
+			// wait for commit from coordinator
+			msg, timeout := waitForMessageFromCoordinator(conn)
+			if timeout {
+				initiateElectionProtocol()
+				return
+			}
+
+			if msg == "commit" {
+				// write commit record in DT log
+				writeToDtLog("commit")
+
+				// add song to local playlist
+				LocalPlaylist.AddOrUpdateSong(song, url)
+			} else {
+				Error("coordinator did not respond commit: ", msg)
+			}
+		} else if msg == "abort" {
+			// write abort record in DT log
+			writeToDtLog("abort")
+		} else {
+			Error("unrecognized response from coordinator: ", msg)
+			return
+		}
+	} else {
+		// vote yes
+		fmt.Fprintln(conn, "no")
+
+		// write abort record in DT log
+		writeToDtLog("abort")
+	}
 }
 
-func deleteParticipant(song, url string) {
-	LocalPlaylist.DeleteSong(song, url)
+func deleteParticipant(conn net.Conn, song string) {
+	// write yes record in DT log
+	writeToDtLog("yes delete", song)
+
+	// vote yes
+	fmt.Fprintln(conn, "yes")
+
+	// wait for message from coordinator
+	msg, timeout := waitForMessageFromCoordinator(conn)
+	if timeout {
+		initiateElectionProtocol()
+		return
+	}
+
+	if msg == "pre-commit" {
+		// send ack to coordinator
+		fmt.Fprintln(conn, "ack")
+
+		// wait for commit from coordinator
+		msg, timeout := waitForMessageFromCoordinator(conn)
+		if timeout {
+			initiateElectionProtocol()
+			return
+		}
+
+		if msg == "commit" {
+			// write commit record in DT log
+			writeToDtLog("commit")
+
+			// delete song from local playlist
+			LocalPlaylist.DeleteSong(song)
+		} else {
+			Error("coordinator did not respond commit: ", msg)
+		}
+	} else if msg == "abort" {
+		// write abort record in DT log
+		writeToDtLog("abort")
+	} else {
+		Error("unrecognized response from coordinator: ", msg)
+		return
+	}
+}
+
+func vote(url string) string {
+	if len(url) > ID+5 {
+		return "no"
+	} else {
+		return "yes"
+	}
+}
+
+func waitForMessageFromCoordinator(conn net.Conn) (string, bool) {
+	conn.SetDeadline(time.Now().Add(TIMEOUT))
+	r := bufio.NewReader(conn)
+	responseBytes, err := r.ReadBytes('\n')
+	if err != nil {
+		Error("failed to read response from coordinator")
+		return "", false
+	}
+
+	response := new(Message)
+	err = json.Unmarshal(responseBytes, response)
+	if err != nil {
+		Error("failed to marshal response from coordinator into message")
+		return "", false
+	}
+
+	if err != nil {
+		netErr, ok := err.(net.Error)
+		if ok && netErr.Timeout() {
+			return "", true
+		} else {
+			return "", false
+		}
+	}
+
+	return response.Content, false
+}
+
+// TODO
+func initiateElectionProtocol() {
+	// TODO: initiate election protocol
+
+	// TODO: if elected, invoke coordinator's algorithm of
+	// termination protocol
+
+	// TODO: else, invoke participant's algorithm of
+	// termination protocol
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -207,3 +655,18 @@ func crashAfterAck()                      {}
 func crashVoteREQ(args []string)          {}
 func crashPretialPreCommit(args []string) {}
 func crashPartialCommit(args []string)    {}
+
+///////////////////////////////////////////////////////////////////////////////
+// DT log     								     //
+///////////////////////////////////////////////////////////////////////////////
+
+func writeToDtLog(entry ...interface{}) {
+	file, err := os.OpenFile(DT_LOG, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	defer file.Close()
+	if err != nil {
+		Error(err)
+		return
+	}
+
+	fmt.Fprintln(file, entry...)
+}
