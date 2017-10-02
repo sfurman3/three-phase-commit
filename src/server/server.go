@@ -114,29 +114,30 @@ func init() {
 
 func main() {
 	// Bind the master-facing and server-facing ports and start listening
-	go serveMaster()
+	go heartbeat()
 	go fetchMessages()
-	heartbeat()
+
+	time.Sleep(TIMEOUT)
+
+	if COORDINATOR == -1 {
+		// this server hasn't been told the identity of the coordinator
+		//
+		// NOTE: if this server is recovering from a failure, then
+		// another is already coordinator
+		COORDINATOR = LastTimestamp.LowestIdAlive()
+
+		if COORDINATOR == ID {
+			// tell the master that this server is the coordinator
+			MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
+		}
+	}
+
+	serveMaster()
 }
 
 // heartbeat sleeps for HEARTBEAT_INTERVAL and broadcasts an empty message to
 // every server to indicate that the server is still alive
 func heartbeat() {
-	go broadcast(emptyMessage())
-	time.Sleep(HEARTBEAT_INTERVAL)
-
-	if COORDINATOR == -1 && LastTimestamp.LowestIdAlive() == ID {
-		// no server has been elected coordinator and this process has the
-		// lowest id
-		//
-		// NOTE: if this server is recovering from a failure, then
-		// another is already coordinator
-		COORDINATOR = ID
-
-		// tell the master that this server is the coordinator
-		MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
-	}
-
 	for {
 		go broadcast(emptyMessage())
 		time.Sleep(HEARTBEAT_INTERVAL)
@@ -193,11 +194,18 @@ func handleMessage(conn net.Conn) {
 		return
 	}
 
-	// Update the heartbeat metadata
+	// update LastTimestamp for the sender
 	// NOTE: assumes message IDs are in {0..n-1}
 	LastTimestamp.UpdateTimestamp(msg)
-	if COORDINATOR == -1 && msg.coordinator != -1 {
+
+	// update the COORDINATOR if higher (i.e. the coordinator has died)
+	if msg.coordinator > COORDINATOR {
 		COORDINATOR = msg.coordinator
+
+		if COORDINATOR == ID {
+			// tell the master that this server is the coordinator
+			MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
+		}
 	}
 
 	if len(msg.Content) == 0 { // msg is an empty message
@@ -225,14 +233,16 @@ func handleMessage(conn net.Conn) {
 			if args[1] == "add" {
 				addParticipant(conn, args[2], args[3])
 			} else {
-				Error("no such vote-req operation: \"", args[1], "\"")
+				Error("no such vote-req operation: \"",
+					strings.Join(args, " "), "\"")
 			}
 		}
 		if argLengthAtLeast(3) {
 			if args[1] == "delete" {
 				deleteParticipant(conn, args[2])
 			} else {
-				Error("no such vote-req operation: \"", args[1], "\"")
+				Error("no such vote-req operation: \"",
+					strings.Join(args, " "), "\"")
 			}
 		}
 	default:
