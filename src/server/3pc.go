@@ -237,7 +237,7 @@ func addCoordinator(args []string) {
 		writeToDtLog("commit")
 
 		// send commit to all participants
-		sendToParticipantsAndAwaitAcks(resps, "commit")
+		sendToParticipants(resps, "commit")
 
 		// send commit to master
 		MessagesToMaster.Enqueue("ack commit")
@@ -303,7 +303,7 @@ func deleteCoordinator(args []string) {
 		writeToDtLog("commit")
 
 		// send commit to all participants
-		sendToParticipantsAndAwaitAcks(resps, "commit")
+		sendToParticipants(resps, "commit")
 
 		// send commit to master
 		MessagesToMaster.Enqueue("ack commit")
@@ -345,6 +345,13 @@ func updateCoordinator(update string, args []string) {
 	// AND wait for vote messages from all participants
 	resps, err, timeout := broadcastToParticipantsAndAwaitResponses(
 		fmt.Sprintf("vote-req %s", operation))
+	defer func() {
+		// wait for any participants to receive sent messages
+		time.Sleep(TIMEOUT)
+		for _, resp := range resps {
+			resp.c.Close()
+		}
+	}()
 	if timeout {
 		// write abort record in DT log
 		writeToDtLog("abort")
@@ -377,9 +384,9 @@ func updateCoordinator(update string, args []string) {
 		writeToDtLog("commit")
 
 		// send commit to all participants
-		sendToParticipantsAndAwaitAcks(resps, "commit")
+		sendToParticipants(resps, "commit")
 
-		// send abort to master
+		// send commit to master
 		MessagesToMaster.Enqueue("ack commit")
 
 		// add song to local playlist
@@ -478,7 +485,6 @@ func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
 			continue
 		}
 
-		defer ptc.c.Close()
 		_, err := fmt.Fprintln(ptc.c, msg)
 		if err != nil {
 			participants[i].c = nil
@@ -493,6 +499,20 @@ func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
 
 			// read ack from recipient
 			r.ReadString('\n')
+		}
+	}
+}
+
+func sendToParticipants(participants []response, msg string) {
+	// send message to participants
+	for i, ptc := range participants {
+		if ptc.id == ID {
+			continue
+		}
+
+		_, err := fmt.Fprintln(ptc.c, msg)
+		if err != nil {
+			participants[i].c = nil
 		}
 	}
 }
@@ -628,14 +648,14 @@ func waitForMessageFromCoordinator(conn net.Conn) (string, error, bool) {
 		netErr, ok := err.(net.Error)
 		if ok && netErr.Timeout() {
 			Error("timed out when reading response from coordinator")
-			return "", err, true
+			return response, err, true
 		} else {
 			Error(err)
-			return "", err, false
+			return response, err, false
 		}
 	}
 
-	return response, nil, false
+	return strings.TrimSpace(response), nil, false
 }
 
 // TODO
