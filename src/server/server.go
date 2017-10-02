@@ -222,8 +222,7 @@ func handleMessage(conn net.Conn) {
 		return true
 	}
 
-	m := strings.Split(msg.Content, " ")
-	switch m[0] {
+	switch args[0] {
 	case "get":
 		if argLengthAtLeast(2) {
 			getParticipant(conn, args[1])
@@ -236,8 +235,7 @@ func handleMessage(conn net.Conn) {
 				Error("no such vote-req operation: \"",
 					strings.Join(args, " "), "\"")
 			}
-		}
-		if argLengthAtLeast(3) {
+		} else if argLengthAtLeast(3) {
 			if args[1] == "delete" {
 				deleteParticipant(conn, args[2])
 			} else {
