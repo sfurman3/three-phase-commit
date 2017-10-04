@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
 	"strconv"
 )
 
 // Error logs the given error
 func Error(err ...interface{}) {
+	// TODO: REMOVE
+	debug.PrintStack()
 	log.Println(ERROR + " " + fmt.Sprint(err...))
 }
 

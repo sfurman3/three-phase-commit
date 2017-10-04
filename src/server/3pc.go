@@ -218,6 +218,8 @@ func addCoordinator(args []string) {
 		MessagesToMaster.Enqueue("ack abort")
 		return
 	} else if err != nil {
+		// TODO: COMBINE THIS WITH THE PREVIOUS CHECK AND DO LIKEWISE
+		// FOR THE REST OF THIS FILE
 		Error(err)
 		return
 	}
@@ -344,8 +346,8 @@ func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error, bo
 	}
 	msgJSON := string(msgBytes)
 
-	// send message to participants
-	for id := 0; id < NUM_PROCS; id++ {
+	// send message to operational participants
+	for _, id := range LastTimestamp.GetAlive(time.Now()) {
 		if id == ID {
 			continue
 		}
