@@ -83,6 +83,7 @@ var (
 	MessagesFIFO     tsMsgQueue       // all received messages in FIFO order
 	LastTimestamp    tsTimestampQueue // timestamp of last message from each server
 	MessagesToMaster tsStringQueue    // pending messages to master
+	DeadLastRound    []bool           // DeadLastRound[i] == true if i was dead last round
 )
 
 // init parses and validates command line arguments (by name or position) and
@@ -102,6 +103,8 @@ func init() {
 	LocalPlaylist = NewPlaylist()
 
 	LastTimestamp.value = make([]time.Time, NUM_PROCS)
+
+	DeadLastRound = make([]bool, NUM_PROCS)
 
 	// make directories for storing logs and playlists
 	fileMode := os.ModePerm | os.ModeDir
@@ -159,7 +162,7 @@ func fetchMessages() {
 			continue
 		}
 
-		handleMessage(conn)
+		handleMessage(ln, conn)
 	}
 }
 
@@ -179,7 +182,7 @@ func fetchMessages() {
 // MessagesFIFO by send timestamp in order to approximate the send order. We
 // could also use a causal delivery method provided by a data structure such as
 // the vector.MessageReceptacle to deliver messages based on causal precedence.
-func handleMessage(conn net.Conn) {
+func handleMessage(ln net.Listener, conn net.Conn) {
 	defer conn.Close()
 
 	messenger := bufio.NewReader(conn)
@@ -230,11 +233,22 @@ func handleMessage(conn net.Conn) {
 	case "vote-req":
 		if argLengthAtLeast(3) {
 			if args[1] == "delete" {
-				deleteParticipant(conn, args[2])
+				deleteParticipant(ln, conn, args[2])
 			} else if argLengthAtLeast(4) && args[1] == "add" {
-				addParticipant(conn, args[2], args[3])
+				addParticipant(ln, conn, args[2], args[3])
 			} else {
 				Error("no such vote-req operation: \"",
+					strings.Join(args, " "), "\"")
+			}
+		}
+	case "state-req":
+		if argLengthAtLeast(3) {
+			if args[1] == "delete" {
+				deleteTerminationProtocolParticipant(conn, args[2])
+			} else if argLengthAtLeast(4) && args[1] == "add" {
+				addTerminationProtocolParticipant(conn, args[2], args[3])
+			} else {
+				Error("no such state-req operation: \"",
 					strings.Join(args, " "), "\"")
 			}
 		}
