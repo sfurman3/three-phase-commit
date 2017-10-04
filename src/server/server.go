@@ -160,6 +160,8 @@ func fetchMessages() {
 		lnr := (ln).(*net.TCPListener)
 		lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 		conn, err := lnr.Accept()
+
+		// elect a new coordinator if the coordinator has died
 		if COORDINATOR != -1 && COORDINATOR != ID && !LastTimestamp.IsAlive(COORDINATOR) {
 			initiateElectionProtocol()
 		}

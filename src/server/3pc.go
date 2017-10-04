@@ -1030,30 +1030,40 @@ func readVoteOrDecisionFromLog(song string) (vote, decision string) {
 
 	lines := bytes.Split(log, []byte{'\n'})
 	songBytes := []byte(song)
-	for i := len(lines); i >= 0; i-- {
+	if len(lines) == 0 {
+		return
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
 		// check to see if the song is the same as in the operation
 		// then set vote or decision accordingly
 		args := bytes.Split(lines[i], []byte{' '})
+		if len(args) < 3 {
+			continue
+		}
 		logSong := args[2]
 		if bytes.Equal(logSong, songBytes) {
 			switch string(args[0]) {
 			case "start-3pc":
 				// I was the coordinator, I neither voted nor
 				// made a decision
+				return
 			case "commit":
 				// I committed
 				decision = "commit"
+				return
 			case "abort":
 				// I aborted
 				decision = "abort"
+				return
 			case "yes":
 				// I am Uncertain
 				vote = "yes"
+				return
 			case "pre-commit":
 				// I am Commitable
 				decision = "pre-commit"
+				return
 			}
-			break
 		}
 	}
 
