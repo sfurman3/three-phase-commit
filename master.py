@@ -36,6 +36,7 @@ class ClientHandler(Thread):
                 (l, rest) = self.buffer.split("\n", 1)
                 self.buffer = rest
                 s = l.split()
+                print s
                 if len(s) < 2:
                     continue
                 if s[0] == 'coordinator':
