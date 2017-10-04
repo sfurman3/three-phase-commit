@@ -125,6 +125,16 @@ func (tsq *tsTimestampQueue) LowestIdAlive() int {
 	return ID
 }
 
+func (tsq *tsTimestampQueue) IsAlive(id int) bool {
+	LastTimestamp.mutex.Lock()
+	if time.Now().Sub(LastTimestamp.value[id]) < ALIVE_INTERVAL {
+		LastTimestamp.mutex.Unlock()
+		return true
+	}
+	LastTimestamp.mutex.Unlock()
+	return false
+}
+
 type tsStringQueue struct {
 	value []string
 	mutex sync.Mutex // mutex for accessing contents

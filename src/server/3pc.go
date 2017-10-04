@@ -535,7 +535,6 @@ func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
 
 				// wait for connection from coordinator
 				lnr := (ln).(*net.TCPListener)
-				defer lnr.SetDeadline(time.Time{})
 			startYes:
 				lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 				conn, err := lnr.Accept()
@@ -753,10 +752,13 @@ func waitForMessageFromCoordinator(conn net.Conn) (string, error, bool) {
 func initiateElectionProtocol() (elected bool, participants []int) {
 	alive := LastTimestamp.GetAlive(time.Now())
 	for ; len(alive) > 0 && COORDINATOR >= alive[0]; alive = alive[1:] {
-		fmt.Println(alive)
 	}
-	COORDINATOR = alive[0]
-	participants = alive[1:]
+	if len(alive) > 0 {
+		COORDINATOR = alive[0]
+		participants = alive[1:]
+	} else {
+		COORDINATOR = ID
+	}
 
 	if COORDINATOR == ID {
 		// tell the master that this server is the coordinator

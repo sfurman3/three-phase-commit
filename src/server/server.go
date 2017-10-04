@@ -157,7 +157,12 @@ func fetchMessages() {
 	}
 
 	for {
-		conn, err := ln.Accept()
+		lnr := (ln).(*net.TCPListener)
+		lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
+		conn, err := lnr.Accept()
+		if COORDINATOR != -1 && COORDINATOR != ID && !LastTimestamp.IsAlive(COORDINATOR) {
+			initiateElectionProtocol()
+		}
 		if err != nil {
 			continue
 		}
