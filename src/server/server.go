@@ -116,26 +116,41 @@ func init() {
 ///////////////////////////////////////////////////////////////////////////////
 
 func main() {
-	// Bind the master-facing and server-facing ports and start listening
+	// bind the server-facing port
+	ln, err := net.Listen("tcp", ":"+strconv.Itoa(PORT))
+	if err != nil {
+		Fatal("failed to bind server-facing port: ", strconv.Itoa(PORT))
+	}
+	determineInitialCoordinator(ln)
+
+	go fetchMessages(ln)
 	go heartbeat()
-	go fetchMessages()
+	serveMaster()
+}
 
-	time.Sleep(TIMEOUT)
+func determineInitialCoordinator(ln net.Listener) {
+	// broadcast some empty messages to indicate the server is alive
+	broadcast(emptyMessage())
 
-	if COORDINATOR == -1 {
-		// this server hasn't been told the identity of the coordinator
-		//
-		// NOTE: if this server is recovering from a failure, then
-		// another is already coordinator
-		COORDINATOR = LastTimestamp.LowestIdAlive()
-
-		if COORDINATOR == ID {
-			// tell the master that this server is the coordinator
-			MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
+	// listen for messages from operational servers -> updating LastTimestamp
+	time.Sleep(HEARTBEAT_INTERVAL) // wait for other servers to spin up
+	for i := 0; i < NUM_PROCS*2; i++ {
+		lnr := (ln).(*net.TCPListener)
+		lnr.SetDeadline(time.Now().Add(TIMEOUT))
+		conn, err := lnr.Accept()
+		if err != nil {
+			continue
 		}
+
+		handleMessage(ln, conn)
 	}
 
-	serveMaster()
+	// determine the coordinator's identity
+	COORDINATOR = LastTimestamp.LowestIdAlive()
+	if COORDINATOR == ID {
+		// tell the master that this server is the coordinator
+		MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
+	}
 }
 
 // heartbeat sleeps for HEARTBEAT_INTERVAL and broadcasts an empty message to
@@ -149,13 +164,7 @@ func heartbeat() {
 
 // fetchMessages retrieves messages from other servers and adds them to the
 // log, listening on PORT (i.e. START_PORT + PORT)
-func fetchMessages() {
-	// Bind the server-facing port and listen for messages
-	ln, err := net.Listen("tcp", ":"+strconv.Itoa(PORT))
-	if err != nil {
-		Fatal("failed to bind server-facing port: ", strconv.Itoa(PORT))
-	}
-
+func fetchMessages(ln net.Listener) {
 	for {
 		lnr := (ln).(*net.TCPListener)
 		lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
@@ -207,16 +216,6 @@ func handleMessage(ln net.Listener, conn net.Conn) {
 	// update LastTimestamp for the sender
 	// NOTE: assumes message IDs are in {0..n-1}
 	LastTimestamp.UpdateTimestamp(msg)
-
-	// update the COORDINATOR if higher (i.e. the coordinator has died)
-	if msg.coordinator > COORDINATOR {
-		COORDINATOR = msg.coordinator
-
-		if COORDINATOR == ID {
-			// tell the master that this server is the coordinator
-			MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
-		}
-	}
 
 	if len(msg.Content) == 0 { // msg is an empty message
 		return
