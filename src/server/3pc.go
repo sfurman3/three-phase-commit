@@ -991,7 +991,7 @@ func terminationProtocolCoordinatorBody(resps []response, song, operation string
 ///////////////////////////////////////////////////////////////////////////////
 
 func crash() {
-	Fatal("CRASH")
+	Fatal("CRASH ", ID)
 }
 
 func crashAfterVote()                     {}
