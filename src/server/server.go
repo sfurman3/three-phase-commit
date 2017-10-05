@@ -202,6 +202,7 @@ func handleMessage(ln net.Listener, conn net.Conn) {
 	defer conn.Close()
 
 	messenger := bufio.NewReader(conn)
+	conn.SetReadDeadline(time.Now().Add(TIMEOUT))
 	msgBytes, err := messenger.ReadBytes('\n')
 	if err != nil {
 		return
@@ -279,6 +280,8 @@ func serveMaster() {
 	}
 
 	for {
+		lnr := (ln).(*net.TCPListener)
+		lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 		masterConn, err := ln.Accept()
 		if err != nil {
 			continue
@@ -301,6 +304,7 @@ func handleMaster(masterConn net.Conn) {
 		// send the next pending message to master
 		msg := MessagesToMaster.Dequeue()
 		if msg != "" {
+			masterConn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 			if _, err := fmt.Fprintln(masterConn, msg); err != nil {
 				MessagesToMaster.PushFront(msg)
 			}
@@ -408,6 +412,7 @@ func sendMarshaled(msg string, id int) error {
 	}
 	defer conn.Close()
 
+	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	_, err = fmt.Fprintln(conn, msg)
 	return err
 }
@@ -427,14 +432,15 @@ func sendAndWaitForResponse(msg string, id int) ([]byte, error) {
 		return nil, err
 	}
 	defer conn.Close()
-	conn.SetReadDeadline(time.Now().Add(TIMEOUT))
 
+	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	_, err = fmt.Fprintln(conn, msg)
 	if err != nil {
 		return nil, err
 	}
 
 	r := bufio.NewReader(conn)
+	conn.SetReadDeadline(time.Now().Add(TIMEOUT))
 	resp, err := r.ReadBytes('\n')
 	if err != nil {
 		if netErr := err.(net.Error); netErr.Timeout() {

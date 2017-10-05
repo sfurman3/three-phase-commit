@@ -184,6 +184,7 @@ func getCoordinator(conn net.Conn, song string) {
 		}
 	}
 
+	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	fmt.Fprintln(conn, "resp", url)
 }
 
@@ -355,6 +356,7 @@ func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error, bo
 		var conn net.Conn
 		conn, err = net.Dial("tcp", ":"+strconv.Itoa(START_PORT+id))
 		if err == nil {
+			conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 			_, err = fmt.Fprintln(conn, msgJSON)
 			if err == nil {
 				conns = append(conns, connection{conn, id})
@@ -407,6 +409,7 @@ func broadcastToParticipantsAndAwaitResponsesTermination(participants []int, msg
 		var conn net.Conn
 		conn, err = net.Dial("tcp", ":"+strconv.Itoa(START_PORT+id))
 		if err == nil {
+			conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 			_, err = fmt.Fprintln(conn, msgJSON)
 			if err == nil {
 				conns = append(conns, connection{conn, id})
@@ -445,6 +448,7 @@ func sendAbortToYesVoters(resps []response) {
 			conn, err := net.Dial("tcp", ":"+strconv.Itoa(START_PORT+resp.id))
 			defer conn.Close()
 			if err == nil {
+				conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 				fmt.Fprintln(conn, abortJson)
 			}
 		}
@@ -470,6 +474,7 @@ func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
 func sendToParticipants(participants []response, msg string) {
 	// send message to participants
 	for i, ptc := range participants {
+		ptc.c.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		_, err := fmt.Fprintln(ptc.c, msg)
 		if err != nil {
 			participants[i].c = nil
@@ -497,6 +502,7 @@ func sendToUncertainParticipants(participants []response, msg string) {
 	// send message to participants
 	for i, ptc := range participants {
 		if ptc.v == "uncertain" {
+			ptc.c.SetWriteDeadline(time.Now().Add(TIMEOUT))
 			_, err := fmt.Fprintln(ptc.c, msg)
 			if err != nil {
 				participants[i].c = nil
@@ -511,6 +517,7 @@ func sendToUncertainParticipants(participants []response, msg string) {
 
 func getParticipant(conn net.Conn, song string) {
 	url := LocalPlaylist.GetSongUrl(song)
+	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	fmt.Fprintln(conn, "resp", url)
 }
 
@@ -521,6 +528,7 @@ func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
 		writeToDtLog("yes add", song, url)
 
 		// vote yes
+		conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		fmt.Fprintln(conn, "yes")
 
 		// wait for message from coordinator
@@ -562,6 +570,7 @@ func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
 			writeToDtLog("pre-commit add", song, url)
 
 			// send ack to coordinator
+			conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 			fmt.Fprintln(conn, "ack")
 
 			// wait for commit from coordinator
@@ -616,7 +625,8 @@ func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
 			return
 		}
 	} else {
-		// vote yes
+		// vote no
+		conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		fmt.Fprintln(conn, "no")
 
 		// write abort record in DT log
@@ -629,6 +639,7 @@ func deleteParticipant(ln net.Listener, conn net.Conn, song string) {
 	writeToDtLog("yes delete", song)
 
 	// vote yes
+	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	fmt.Fprintln(conn, "yes")
 
 	// wait for message from coordinator
@@ -671,6 +682,7 @@ func deleteParticipant(ln net.Listener, conn net.Conn, song string) {
 		writeToDtLog("pre-commit delete", song)
 
 		// send ack to coordinator
+		conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		fmt.Fprintln(conn, "ack")
 
 		// wait for commit from coordinator
@@ -815,6 +827,7 @@ start:
 	}
 
 	// send state to coordinator
+	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	fmt.Fprintln(conn, state)
 
 	// wait for response from coordinator
@@ -842,6 +855,7 @@ start:
 		// response was pre-commit
 
 		// send ack to coordinator
+		conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		fmt.Fprintln(conn, "ack")
 
 		// wait for commit from coordinator
@@ -891,6 +905,7 @@ start:
 	}
 
 	// send state to coordinator
+	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	fmt.Fprintln(conn, state)
 
 	// wait for response from coordinator
@@ -918,6 +933,7 @@ start:
 		// response was pre-commit
 
 		// send ack to coordinator
+		conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		fmt.Fprintln(conn, "ack")
 
 		// wait for commit from coordinator
