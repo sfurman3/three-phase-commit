@@ -545,6 +545,7 @@ func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
 
 				// wait for connection from coordinator
 				lnr := (ln).(*net.TCPListener)
+				defer lnr.SetDeadline(time.Time{})
 			startYes:
 				lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 				conn, err := lnr.Accept()

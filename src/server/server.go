@@ -121,11 +121,24 @@ func main() {
 	if err != nil {
 		Fatal("failed to bind server-facing port: ", strconv.Itoa(PORT))
 	}
+
+	go heartbeat()
 	determineInitialCoordinator(ln)
 
 	go fetchMessages(ln)
-	go heartbeat()
-	serveMaster()
+	go serveMaster()
+
+	// TODO: REMOVE?
+	// check to see if the master has died and, if so, elect a new
+	// coordinator
+	for {
+		time.Sleep(1000 * time.Millisecond)
+
+		// elect a new coordinator if the coordinator has died
+		if COORDINATOR != -1 && COORDINATOR != ID && !LastTimestamp.IsAlive(COORDINATOR) {
+			initiateElectionProtocol()
+		}
+	}
 }
 
 func determineInitialCoordinator(ln net.Listener) {
@@ -133,9 +146,22 @@ func determineInitialCoordinator(ln net.Listener) {
 	broadcast(emptyMessage())
 
 	// listen for messages from operational servers -> updating LastTimestamp
-	time.Sleep(HEARTBEAT_INTERVAL) // wait for other servers to spin up
-	for i := 0; i < NUM_PROCS*2; i++ {
-		lnr := (ln).(*net.TCPListener)
+	lnr := (ln).(*net.TCPListener)
+	defer lnr.SetDeadline(time.Time{})
+	// TODO: change to NUM_PROCS*2
+	for i := 0; i < 100; i++ {
+		lnr.SetDeadline(time.Now().Add(TIMEOUT))
+		conn, err := lnr.Accept()
+		if err != nil {
+			continue
+		}
+
+		handleMessage(ln, conn)
+	}
+	// TODO: CHANGE to HEARTBEAT_INTERVAL?
+	time.Sleep(1000 * time.Millisecond) // wait for other servers to spin up
+	// TODO: change to NUM_PROCS*2
+	for i := 0; i < 100; i++ {
 		lnr.SetDeadline(time.Now().Add(TIMEOUT))
 		conn, err := lnr.Accept()
 		if err != nil {
@@ -147,6 +173,8 @@ func determineInitialCoordinator(ln net.Listener) {
 
 	// determine the coordinator's identity
 	COORDINATOR = LastTimestamp.LowestIdAlive()
+	// TODO: remove
+	fmt.Println(ID, "elected", COORDINATOR)
 	if COORDINATOR == ID {
 		// tell the master that this server is the coordinator
 		MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
@@ -166,14 +194,9 @@ func heartbeat() {
 // log, listening on PORT (i.e. START_PORT + PORT)
 func fetchMessages(ln net.Listener) {
 	for {
-		lnr := (ln).(*net.TCPListener)
-		lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
-		conn, err := lnr.Accept()
-
-		// elect a new coordinator if the coordinator has died
-		if COORDINATOR != -1 && COORDINATOR != ID && !LastTimestamp.IsAlive(COORDINATOR) {
-			initiateElectionProtocol()
-		}
+		// TODO: REMOVE
+		fmt.Println(ID, "waiting for a message")
+		conn, err := ln.Accept()
 		if err != nil {
 			continue
 		}
@@ -221,6 +244,9 @@ func handleMessage(ln net.Listener, conn net.Conn) {
 	if len(msg.Content) == 0 { // msg is an empty message
 		return
 	}
+
+	// TODO: REMOVE
+	fmt.Println(ID, "handling", msg.Content)
 
 	args := strings.Split(msg.Content, " ")
 	argLengthAtLeast := func(min int) bool {
@@ -280,8 +306,6 @@ func serveMaster() {
 	}
 
 	for {
-		lnr := (ln).(*net.TCPListener)
-		lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 		masterConn, err := ln.Accept()
 		if err != nil {
 			continue
