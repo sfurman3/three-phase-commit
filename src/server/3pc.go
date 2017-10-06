@@ -203,9 +203,16 @@ func addCoordinator(args []string) {
 
 	// send VOTE-REQ to all participants
 	// AND wait for vote messages from all participants
-	resps, err, timeout := broadcastToParticipantsAndAwaitResponses(
+	resps, err := broadcastToParticipantsAndAwaitResponses(
 		fmt.Sprintf("vote-req add %s %s", song, url))
-	if timeout {
+	// TODO: REMOVE
+	fmt.Println("broadcast", fmt.Sprintf("vote-req add %s %s", song, url))
+	defer func() {
+		for _, resp := range resps {
+			resp.c.Close()
+		}
+	}()
+	if err != nil {
 		// write abort record in DT log
 		writeToDtLog("abort add", song, url)
 
@@ -214,9 +221,6 @@ func addCoordinator(args []string) {
 
 		// send abort to master
 		MessagesToMaster.Enqueue("ack abort")
-		return
-	} else if err != nil {
-		Error(err)
 		return
 	}
 
@@ -269,9 +273,16 @@ func deleteCoordinator(args []string) {
 
 	// send VOTE-REQ to all participants
 	// AND wait for vote messages from all participants
-	resps, err, timeout := broadcastToParticipantsAndAwaitResponses(
+	resps, err := broadcastToParticipantsAndAwaitResponses(
 		"vote-req delete " + song)
-	if timeout {
+	// TODO: REMOVE
+	fmt.Println("broadcast", fmt.Sprintf("vote-req delete %s", song))
+	defer func() {
+		for _, resp := range resps {
+			resp.c.Close()
+		}
+	}()
+	if err != nil {
 		// write abort record in DT log
 		writeToDtLog("abort delete", song)
 
@@ -280,9 +291,6 @@ func deleteCoordinator(args []string) {
 
 		// send abort to master
 		MessagesToMaster.Enqueue("ack abort")
-		return
-	} else if err != nil {
-		Error(err)
 		return
 	}
 
@@ -343,9 +351,14 @@ func updateCoordinator(update string, args []string) {
 
 	// send VOTE-REQ to all participants
 	// AND wait for vote messages from all participants
-	resps, err, timeout := broadcastToParticipantsAndAwaitResponses(
+	resps, err := broadcastToParticipantsAndAwaitResponses(
 		fmt.Sprintf("vote-req %s", operation))
-	if timeout {
+	defer func() {
+		for _, resp := range resps {
+			resp.c.Close()
+		}
+	}()
+	if err != nil {
 		// write abort record in DT log
 		writeToDtLog("abort", update)
 
@@ -354,9 +367,6 @@ func updateCoordinator(update string, args []string) {
 
 		// send abort to master
 		MessagesToMaster.Enqueue("ack abort")
-		return
-	} else if err != nil {
-		Error(err)
 		return
 	}
 
@@ -400,7 +410,7 @@ func updateCoordinator(update string, args []string) {
 	return
 }
 
-func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error, bool) {
+func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error) {
 	type connection struct {
 		c  net.Conn
 		id int
@@ -408,16 +418,17 @@ func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error, bo
 
 	var responses []response
 	var conns []connection
-	timeout := false
 
 	msgBytes, err := json.Marshal(newMessage(msg))
 	if err != nil {
-		return nil, err, timeout
+		return nil, err
 	}
 	msgJSON := string(msgBytes)
 
 	// send message to participants
-	for id := 0; id < NUM_PROCS; id++ {
+	// TODO: Replace with LastTimestamp.GetAlive()
+	for _, id := range LastTimestamp.GetAlive(time.Now()) {
+		//for id := 0; id < NUM_PROCS; id++ {
 		if id == ID {
 			continue
 		}
@@ -444,12 +455,10 @@ func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error, bo
 		resp = strings.TrimSpace(resp)
 		if err == nil {
 			responses = append(responses, response{resp, conn.c, conn.id})
-		} else {
-			timeout = true
 		}
 	}
 
-	return responses, err, timeout
+	return responses, err
 }
 
 func sendAbortToYesVoters(resps []response) {
@@ -463,7 +472,6 @@ func sendAbortToYesVoters(resps []response) {
 		if resp.v == "yes" {
 			// send abort
 			conn, err := net.Dial("tcp", ":"+strconv.Itoa(START_PORT+resp.id))
-			defer conn.Close()
 			if err == nil {
 				fmt.Fprintln(conn, abortJson)
 			}
@@ -478,7 +486,6 @@ func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
 			continue
 		}
 
-		defer ptc.c.Close()
 		_, err := fmt.Fprintln(ptc.c, msg)
 		if err != nil {
 			participants[i].c = nil
@@ -520,6 +527,8 @@ func addParticipant(conn net.Conn, song, url string) {
 		msg, err := rdr.ReadString('\n')
 		msg = strings.TrimSpace(msg)
 		if err != nil {
+			// TODO: REMOVE
+			Error(err, COORDINATOR, msg)
 			initiateElectionProtocol()
 			return
 		}
@@ -532,6 +541,8 @@ func addParticipant(conn net.Conn, song, url string) {
 			msg, err := rdr.ReadString('\n')
 			msg = strings.TrimSpace(msg)
 			if err != nil {
+				// TODO: REMOVE
+				Error(err, COORDINATOR, msg)
 				initiateElectionProtocol()
 				return
 			}
@@ -573,6 +584,8 @@ func deleteParticipant(conn net.Conn, song string) {
 	msg, err := rdr.ReadString('\n')
 	msg = strings.TrimSpace(msg)
 	if err != nil {
+		// TODO: REMOVE
+		Error(err, COORDINATOR, msg)
 		initiateElectionProtocol()
 		return
 	}
@@ -585,6 +598,8 @@ func deleteParticipant(conn net.Conn, song string) {
 		msg, err := rdr.ReadString('\n')
 		msg = strings.TrimSpace(msg)
 		if err != nil {
+			// TODO: REMOVE
+			Error(err, COORDINATOR, msg)
 			initiateElectionProtocol()
 			return
 		}
@@ -635,15 +650,31 @@ func waitForMessageFromCoordinator(conn net.Conn) (string, error, bool) {
 	return strings.TrimSpace(response), nil, false
 }
 
-// TODO
-func initiateElectionProtocol() {
-	// TODO: initiate election protocol
+func initiateElectionProtocol() (elected bool, participants []int) {
+	// TODO: REMOVE
+	fmt.Println(ID, "electing a new coordinator")
+	// TODO: REMOVE?
+	time.Sleep(HEARTBEAT_INTERVAL)
+	alive := LastTimestamp.GetAlive(time.Now())
+	for ; len(alive) > 0 && COORDINATOR >= alive[0]; alive = alive[1:] {
+	}
+	if len(alive) > 0 {
+		COORDINATOR = alive[0]
+		participants = alive[1:]
+	} else {
+		COORDINATOR = ID
+	}
 
-	// TODO: if elected, invoke coordinator's algorithm of
-	// termination protocol
+	// TODO: REMOVE
+	fmt.Println(ID, "elected", COORDINATOR)
 
-	// TODO: else, invoke participant's algorithm of
-	// termination protocol
+	if COORDINATOR == ID {
+		// tell the master that this server is the coordinator
+		MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
+		elected = true
+	}
+
+	return elected, participants
 }
 
 ///////////////////////////////////////////////////////////////////////////////

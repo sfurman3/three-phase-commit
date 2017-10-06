@@ -151,13 +151,39 @@ func heartbeat() {
 // fetchMessages retrieves messages from other servers and adds them to the
 // log, listening on PORT (i.e. START_PORT + PORT)
 func fetchMessages(ln net.Listener) {
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			continue
-		}
+	type acceptResult struct {
+		conn net.Conn
+		err  error
+	}
+	connChan := make(chan acceptResult)
+	electChan := make(chan bool)
 
-		handleMessage(conn)
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			connChan <- acceptResult{conn, err}
+		}
+	}()
+	go func() {
+		for {
+			time.Sleep(3000 * time.Millisecond)
+			if COORDINATOR != ID && !LastTimestamp.IsAlive(COORDINATOR) {
+				elected, _ := initiateElectionProtocol()
+				electChan <- elected
+			}
+		}
+	}()
+
+	for {
+		select {
+		case ar := <-connChan:
+			if ar.err != nil {
+				continue
+			}
+
+			handleMessage(ar.conn)
+		case <-electChan:
+		}
 	}
 }
 
