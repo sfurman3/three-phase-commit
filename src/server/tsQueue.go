@@ -55,6 +55,12 @@ func (tsq *tsTimestampQueue) UpdateTimestamp(msg *Message) {
 	LastTimestamp.mutex.Unlock()
 }
 
+func (tsq *tsTimestampQueue) UpdateTimestampById(id int) {
+	LastTimestamp.mutex.Lock()
+	LastTimestamp.value[id] = time.Now()
+	LastTimestamp.mutex.Unlock()
+}
+
 func (tsq *tsTimestampQueue) WriteAlive(rwr *bufio.ReadWriter, now time.Time) {
 	LastTimestamp.mutex.Lock()
 	stmps := LastTimestamp.value

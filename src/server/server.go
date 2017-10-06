@@ -52,6 +52,7 @@ const (
 	// Base port for servers in the system
 	// Port numbers are always START_PORT + ID
 	START_PORT = 20000
+	END_PORT   = 30000 - 1
 
 	// Duration between heartbeat messages (i.e. empty messages broadcasted
 	// to other servers to indicate the server is alive)
@@ -59,7 +60,7 @@ const (
 
 	// Maximum interval after the send timestamp of the last message
 	// received from a server for which the sender is considered alive
-	ALIVE_INTERVAL = 200 * time.Millisecond
+	ALIVE_INTERVAL = 250 * time.Millisecond
 
 	// Timeout for waiting for a response from the coordinator
 	TIMEOUT = 10 * time.Millisecond
@@ -77,6 +78,7 @@ var (
 	REQUIRED_ARGUMENTS = []*int{&ID, &NUM_PROCS, &MASTER_PORT}
 
 	PORT        = -1   // server's port number
+	HEART_PORT  = -1   // port used for receiving heartbeats
 	COORDINATOR = -1   // coordinator's id number
 	DT_LOG      string // name of server's DT Log file
 
@@ -98,11 +100,15 @@ func init() {
 	logDir := "logs"
 
 	PORT = START_PORT + ID
+	HEART_PORT = END_PORT - ID
 	DT_LOG = fmt.Sprintf("%s/dt_log_%0*d.log", logDir, len(os.Args[2]), ID)
 
 	LocalPlaylist = NewPlaylist()
 
 	LastTimestamp.value = make([]time.Time, NUM_PROCS)
+	for i := range LastTimestamp.value {
+		LastTimestamp.value[i] = time.Now()
+	}
 
 	// make directories for storing logs and playlists
 	fileMode := os.ModePerm | os.ModeDir
@@ -119,6 +125,7 @@ func main() {
 	if err != nil {
 		Fatal("failed to bind server-facing port: ", strconv.Itoa(PORT))
 	}
+
 	go fetchMessages(ln)
 	go heartbeat()
 	serveMaster()
@@ -143,8 +150,48 @@ func determineInitialCoordinator(ln net.Listener) {
 // heartbeat sleeps for HEARTBEAT_INTERVAL and broadcasts an empty message to
 // every server to indicate that the server is still alive
 func heartbeat() {
+	ln, err := net.Listen("tcp", ":"+strconv.Itoa(END_PORT-ID))
+	if err != nil {
+		Fatal(err)
+	}
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				continue
+			}
+
+			rdr := bufio.NewReader(conn)
+			msg, err := rdr.ReadString('\n')
+			if err != nil {
+				continue
+			}
+
+			id, err := strconv.Atoi(strings.TrimSpace(msg))
+			if err != nil {
+				continue
+			}
+
+			LastTimestamp.UpdateTimestampById(id)
+		}
+	}()
+
 	for {
-		go broadcast(emptyMessage())
+		go func() {
+			for id := 0; id < ID; id++ {
+				conn, err := net.Dial("tcp", ":"+strconv.Itoa(END_PORT-id))
+				if err == nil {
+					fmt.Fprintln(conn, ID)
+				}
+			}
+			for id := ID + 1; id < NUM_PROCS; id++ {
+				conn, err := net.Dial("tcp", ":"+strconv.Itoa(END_PORT-id))
+				if err == nil {
+					fmt.Fprintln(conn, ID)
+				}
+			}
+		}()
 		time.Sleep(HEARTBEAT_INTERVAL)
 	}
 }
@@ -152,40 +199,32 @@ func heartbeat() {
 // fetchMessages retrieves messages from other servers and adds them to the
 // log, listening on PORT (i.e. START_PORT + PORT)
 func fetchMessages(ln net.Listener) {
-	type acceptResult struct {
-		conn net.Conn
-		err  error
-	}
-
 	var lock sync.Mutex
-	connChan := make(chan acceptResult)
-	electChan := make(chan bool)
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			connChan <- acceptResult{conn, err}
-		}
-	}()
 	go func() {
 		for {
 			lock.Lock()
 			if COORDINATOR != ID && !LastTimestamp.IsAlive(COORDINATOR) {
-				elected, _ := initiateElectionProtocol()
-				electChan <- elected
+				alive := LastTimestamp.GetAlive(time.Now())
+				// TODO: REMOVE
+				fmt.Println(ID, "alive", alive)
+				COORDINATOR = alive[0]
+				// TODO: REMOVE
+				fmt.Println(ID, "elected", COORDINATOR)
+				if COORDINATOR == ID {
+					MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
+				}
 			}
 			lock.Unlock()
 		}
 	}()
 
 	for {
-		select {
-		case ar := <-connChan:
-			if ar.err == nil {
-				lock.Lock()
-				handleMessage(ar.conn)
-				lock.Unlock()
-			}
-		case <-electChan:
+		conn, err := ln.Accept()
+
+		if err == nil {
+			lock.Lock()
+			handleMessage(conn)
+			lock.Unlock()
 		}
 	}
 }
@@ -219,20 +258,6 @@ func handleMessage(conn net.Conn) {
 	err = json.Unmarshal(msgBytes, msg)
 	if err != nil {
 		return
-	}
-
-	// update LastTimestamp for the sender
-	// NOTE: assumes message IDs are in {0..n-1}
-	LastTimestamp.UpdateTimestamp(msg)
-
-	// update the COORDINATOR if higher (i.e. the coordinator has died)
-	if msg.coordinator > COORDINATOR {
-		COORDINATOR = msg.coordinator
-
-		if COORDINATOR == ID {
-			// tell the master that this server is the coordinator
-			MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
-		}
 	}
 
 	if len(msg.Content) == 0 { // msg is an empty message

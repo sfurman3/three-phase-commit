@@ -422,9 +422,10 @@ func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error) {
 	msgJSON := string(msgBytes)
 
 	// send message to participants
-	// TODO: Replace with LastTimestamp.GetAlive()
-	for _, id := range LastTimestamp.GetAlive(time.Now()) {
-		//for id := 0; id < NUM_PROCS; id++ {
+	participants := LastTimestamp.GetAlive(time.Now())
+	// TODO: REMOVE
+	fmt.Println("broadcast participants:", participants)
+	for _, id := range participants {
 		if id == ID {
 			continue
 		}
@@ -649,8 +650,6 @@ func waitForMessageFromCoordinator(conn net.Conn) (string, error, bool) {
 func initiateElectionProtocol() (elected bool, participants []int) {
 	// TODO: REMOVE
 	fmt.Println(ID, "electing a new coordinator")
-	// TODO: REMOVE?
-	time.Sleep(HEARTBEAT_INTERVAL)
 	alive := LastTimestamp.GetAlive(time.Now())
 	for ; len(alive) > 0 && COORDINATOR >= alive[0]; alive = alive[1:] {
 	}
