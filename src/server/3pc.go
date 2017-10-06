@@ -207,7 +207,7 @@ func addCoordinator(args []string) {
 		fmt.Sprintf("vote-req add %s %s", song, url))
 	if timeout {
 		// write abort record in DT log
-		writeToDtLog("abort")
+		writeToDtLog("abort add", song, url)
 
 		// send abort to all processes that voted yes
 		sendAbortToYesVoters(resps)
@@ -234,7 +234,7 @@ func addCoordinator(args []string) {
 		sendToParticipantsAndAwaitAcks(resps, "pre-commit")
 
 		// write commit record to DT log
-		writeToDtLog("commit")
+		writeToDtLog("commit add", song, url)
 
 		// send commit to all participants
 		sendToParticipantsAndAwaitAcks(resps, "commit")
@@ -248,7 +248,7 @@ func addCoordinator(args []string) {
 		// some participant voted no
 
 		// write abort record in DT log
-		writeToDtLog("abort")
+		writeToDtLog("abort add", song, url)
 
 		// send abort to all processes that voted yes
 		sendAbortToYesVoters(resps)
@@ -273,7 +273,7 @@ func deleteCoordinator(args []string) {
 		"vote-req delete " + song)
 	if timeout {
 		// write abort record in DT log
-		writeToDtLog("abort")
+		writeToDtLog("abort delete", song)
 
 		// send abort to all processes that voted yes
 		sendAbortToYesVoters(resps)
@@ -300,7 +300,7 @@ func deleteCoordinator(args []string) {
 		sendToParticipantsAndAwaitAcks(resps, "pre-commit")
 
 		// write commit record to DT log
-		writeToDtLog("commit")
+		writeToDtLog("commit delete", song)
 
 		// send commit to all participants
 		sendToParticipantsAndAwaitAcks(resps, "commit")
@@ -314,7 +314,7 @@ func deleteCoordinator(args []string) {
 		// some participant voted no
 
 		// write abort record in DT log
-		writeToDtLog("abort")
+		writeToDtLog("abort delete", song)
 
 		// send abort to all processes that voted yes
 		sendAbortToYesVoters(resps)
@@ -347,7 +347,7 @@ func updateCoordinator(update string, args []string) {
 		fmt.Sprintf("vote-req %s", operation))
 	if timeout {
 		// write abort record in DT log
-		writeToDtLog("abort")
+		writeToDtLog("abort", update)
 
 		// send abort to all processes that voted yes
 		sendAbortToYesVoters(resps)
@@ -374,7 +374,7 @@ func updateCoordinator(update string, args []string) {
 		sendToParticipantsAndAwaitAcks(resps, "pre-commit")
 
 		// write commit record to DT log
-		writeToDtLog("commit")
+		writeToDtLog("commit", update)
 
 		// send commit to all participants
 		sendToParticipantsAndAwaitAcks(resps, "commit")
@@ -388,7 +388,7 @@ func updateCoordinator(update string, args []string) {
 		// some participant voted no
 
 		// write abort record in DT log
-		writeToDtLog("abort")
+		writeToDtLog("abort", update)
 
 		// send abort to all processes that voted yes
 		sendAbortToYesVoters(resps)
@@ -541,7 +541,7 @@ func addParticipant(conn net.Conn, song, url string) {
 
 			if msg == "commit" {
 				// write commit record in DT log
-				writeToDtLog("commit")
+				writeToDtLog("commit add", song, url)
 
 				// add song to local playlist
 				LocalPlaylist.AddOrUpdateSong(song, url)
@@ -550,7 +550,7 @@ func addParticipant(conn net.Conn, song, url string) {
 			}
 		} else if msg == "abort" {
 			// write abort record in DT log
-			writeToDtLog("abort")
+			writeToDtLog("abort add", song, url)
 		} else {
 			Error("unrecognized response from coordinator: ", msg)
 			return
@@ -560,7 +560,7 @@ func addParticipant(conn net.Conn, song, url string) {
 		fmt.Fprintln(conn, "no")
 
 		// write abort record in DT log
-		writeToDtLog("abort")
+		writeToDtLog("abort add", song, url)
 	}
 }
 
@@ -594,7 +594,7 @@ func deleteParticipant(conn net.Conn, song string) {
 
 		if msg == "commit" {
 			// write commit record in DT log
-			writeToDtLog("commit")
+			writeToDtLog("commit delete", song)
 
 			// delete song from local playlist
 			LocalPlaylist.DeleteSong(song)
@@ -603,7 +603,7 @@ func deleteParticipant(conn net.Conn, song string) {
 		}
 	} else if msg == "abort" {
 		// write abort record in DT log
-		writeToDtLog("abort")
+		writeToDtLog("abort delete", song)
 	} else {
 		Error("unrecognized response from coordinator: ", msg)
 		return
@@ -635,7 +635,7 @@ func waitForMessageFromCoordinator(conn net.Conn) (string, error, bool) {
 		}
 	}
 
-	return response, nil, false
+	return strings.TrimSpace(response), nil, false
 }
 
 // TODO

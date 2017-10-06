@@ -113,26 +113,30 @@ func init() {
 ///////////////////////////////////////////////////////////////////////////////
 
 func main() {
-	// Bind the master-facing and server-facing ports and start listening
-	go heartbeat()
-	go fetchMessages()
-
-	time.Sleep(TIMEOUT)
-
-	if COORDINATOR == -1 {
-		// this server hasn't been told the identity of the coordinator
-		//
-		// NOTE: if this server is recovering from a failure, then
-		// another is already coordinator
-		COORDINATOR = LastTimestamp.LowestIdAlive()
-
-		if COORDINATOR == ID {
-			// tell the master that this server is the coordinator
-			MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
-		}
+	// Bind the server-facing port and listen for messages
+	ln, err := net.Listen("tcp", ":"+strconv.Itoa(PORT))
+	if err != nil {
+		Fatal("failed to bind server-facing port: ", strconv.Itoa(PORT))
 	}
-
+	go fetchMessages(ln)
+	go heartbeat()
 	serveMaster()
+}
+
+func determineInitialCoordinator(ln net.Listener) {
+	// broadcast some empty messages to indicate the server is alive
+	broadcast(emptyMessage())
+
+	time.Sleep(1000 * time.Millisecond) // wait for other servers to spin up
+
+	// determine the coordinator's identity
+	COORDINATOR = LastTimestamp.LowestIdAlive()
+	// TODO: remove
+	fmt.Println(ID, "elected", COORDINATOR)
+	if COORDINATOR == ID {
+		// tell the master that this server is the coordinator
+		MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
+	}
 }
 
 // heartbeat sleeps for HEARTBEAT_INTERVAL and broadcasts an empty message to
@@ -146,13 +150,7 @@ func heartbeat() {
 
 // fetchMessages retrieves messages from other servers and adds them to the
 // log, listening on PORT (i.e. START_PORT + PORT)
-func fetchMessages() {
-	// Bind the server-facing port and listen for messages
-	ln, err := net.Listen("tcp", ":"+strconv.Itoa(PORT))
-	if err != nil {
-		Fatal("failed to bind server-facing port: ", strconv.Itoa(PORT))
-	}
-
+func fetchMessages(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
