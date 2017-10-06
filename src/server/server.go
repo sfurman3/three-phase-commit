@@ -44,6 +44,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -155,9 +156,10 @@ func fetchMessages(ln net.Listener) {
 		conn net.Conn
 		err  error
 	}
+
+	var lock sync.Mutex
 	connChan := make(chan acceptResult)
 	electChan := make(chan bool)
-
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -166,22 +168,23 @@ func fetchMessages(ln net.Listener) {
 	}()
 	go func() {
 		for {
-			time.Sleep(3000 * time.Millisecond)
+			lock.Lock()
 			if COORDINATOR != ID && !LastTimestamp.IsAlive(COORDINATOR) {
 				elected, _ := initiateElectionProtocol()
 				electChan <- elected
 			}
+			lock.Unlock()
 		}
 	}()
 
 	for {
 		select {
 		case ar := <-connChan:
-			if ar.err != nil {
-				continue
+			if ar.err == nil {
+				lock.Lock()
+				handleMessage(ar.conn)
+				lock.Unlock()
 			}
-
-			handleMessage(ar.conn)
 		case <-electChan:
 		}
 	}
@@ -235,6 +238,9 @@ func handleMessage(conn net.Conn) {
 	if len(msg.Content) == 0 { // msg is an empty message
 		return
 	}
+
+	// TODO: REMOVE
+	fmt.Println(ID, "received", msg.Content)
 
 	args := strings.Split(msg.Content, " ")
 	argLengthAtLeast := func(min int) bool {
@@ -328,6 +334,8 @@ func handleMaster(masterConn net.Conn) {
 		}
 
 		command = strings.TrimSpace(command)
+		// TODO: REMOVE
+		fmt.Println(ID, "received:", command)
 		execute(masterConn, command)
 	}
 }

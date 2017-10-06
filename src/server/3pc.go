@@ -205,8 +205,6 @@ func addCoordinator(args []string) {
 	// AND wait for vote messages from all participants
 	resps, err := broadcastToParticipantsAndAwaitResponses(
 		fmt.Sprintf("vote-req add %s %s", song, url))
-	// TODO: REMOVE
-	fmt.Println("broadcast", fmt.Sprintf("vote-req add %s %s", song, url))
 	defer func() {
 		for _, resp := range resps {
 			resp.c.Close()
@@ -275,8 +273,6 @@ func deleteCoordinator(args []string) {
 	// AND wait for vote messages from all participants
 	resps, err := broadcastToParticipantsAndAwaitResponses(
 		"vote-req delete " + song)
-	// TODO: REMOVE
-	fmt.Println("broadcast", fmt.Sprintf("vote-req delete %s", song))
 	defer func() {
 		for _, resp := range resps {
 			resp.c.Close()
