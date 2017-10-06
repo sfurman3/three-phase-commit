@@ -516,12 +516,11 @@ func addParticipant(conn net.Conn, song, url string) {
 		fmt.Fprintln(conn, "yes")
 
 		// wait for message from coordinator
-		msg, err, timeout := waitForMessageFromCoordinator(conn)
-		if timeout {
+		rdr := bufio.NewReader(conn)
+		msg, err := rdr.ReadString('\n')
+		msg = strings.TrimSpace(msg)
+		if err != nil {
 			initiateElectionProtocol()
-			return
-		} else if err != nil {
-			Error(err)
 			return
 		}
 
@@ -530,12 +529,10 @@ func addParticipant(conn net.Conn, song, url string) {
 			fmt.Fprintln(conn, "ack")
 
 			// wait for commit from coordinator
-			msg, err, timeout := waitForMessageFromCoordinator(conn)
-			if timeout {
+			msg, err := rdr.ReadString('\n')
+			msg = strings.TrimSpace(msg)
+			if err != nil {
 				initiateElectionProtocol()
-				return
-			} else if err != nil {
-				Error(err)
 				return
 			}
 
@@ -572,12 +569,11 @@ func deleteParticipant(conn net.Conn, song string) {
 	fmt.Fprintln(conn, "yes")
 
 	// wait for message from coordinator
-	msg, err, timeout := waitForMessageFromCoordinator(conn)
-	if timeout {
+	rdr := bufio.NewReader(conn)
+	msg, err := rdr.ReadString('\n')
+	msg = strings.TrimSpace(msg)
+	if err != nil {
 		initiateElectionProtocol()
-		return
-	} else if err != nil {
-		Error(err)
 		return
 	}
 
@@ -586,8 +582,9 @@ func deleteParticipant(conn net.Conn, song string) {
 		fmt.Fprintln(conn, "ack")
 
 		// wait for commit from coordinator
-		msg, _, timeout := waitForMessageFromCoordinator(conn)
-		if timeout {
+		msg, err := rdr.ReadString('\n')
+		msg = strings.TrimSpace(msg)
+		if err != nil {
 			initiateElectionProtocol()
 			return
 		}

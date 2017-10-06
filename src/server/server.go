@@ -226,16 +226,16 @@ func handleMessage(conn net.Conn) {
 			getParticipant(conn, args[1])
 		}
 	case "vote-req":
-		if argLengthAtLeast(4) {
-			if args[1] == "add" {
-				addParticipant(conn, args[2], args[3])
-			} else {
-				Error("no such vote-req operation: \"",
-					strings.Join(args, " "), "\"")
-			}
-		} else if argLengthAtLeast(3) {
+		if argLengthAtLeast(3) {
 			if args[1] == "delete" {
 				deleteParticipant(conn, args[2])
+			} else if argLengthAtLeast(4) {
+				if args[1] == "add" {
+					addParticipant(conn, args[2], args[3])
+				} else {
+					Error("no such vote-req operation: \"",
+						strings.Join(args, " "), "\"")
+				}
 			} else {
 				Error("no such vote-req operation: \"",
 					strings.Join(args, " "), "\"")

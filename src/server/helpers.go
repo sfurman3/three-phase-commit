@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
 	"strconv"
 )
 
 // Error logs the given error
 func Error(err ...interface{}) {
-	log.Println(ERROR + " " + fmt.Sprint(err...))
+	debug.PrintStack()
+	log.Println(ID, ERROR+" "+fmt.Sprint(err...))
 }
 
 // Fail logs the given error and exits with status 1
