@@ -86,6 +86,20 @@ var (
 	MessagesFIFO     tsMsgQueue       // all received messages in FIFO order
 	LastTimestamp    tsTimestampQueue // timestamp of last message from each server
 	MessagesToMaster tsStringQueue    // pending messages to master
+
+	// participant crash booleans
+	CrashAfterVote  bool // participant crashes after sending vote
+	CrashBeforeVote bool // participant crashes after receiving vote-req but before sending vote
+	CrashAfterAck   bool // participant crashes after sending ack
+
+	// coordinator crash booleans
+	CrashVoteREQ          bool // crash after sending vote requests to participants
+	CrashPartialPreCommit bool // crash after sending precommit to participants
+	CrashPartialCommit    bool // crash after sending commit to participants
+
+	CrashVoteREQList          []int
+	CrashPartialPreCommitList []int
+	CrashPartialCommitList    []int
 )
 
 // init parses and validates command line arguments (by name or position) and

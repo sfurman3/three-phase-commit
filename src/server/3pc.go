@@ -47,28 +47,14 @@ func execute(conn net.Conn, command string) {
 	case "crashAfterAck":
 		crashAfterAck()
 
+	case "crashVoteREQ":
+		crashVoteREQ(args[1:])
+	case "crashPartialPreCommit":
+		crashPartialPreCommit(args[1:])
+	case "crashPartialCommit":
+		crashPartialCommit(args[1:])
 	default:
-		if len(args) == 1 {
-			switch args[0] {
-			case "crashVoteREQ":
-			case "crashPartialPreCommit":
-			case "crashPartialCommit":
-				crash()
-			default:
-				Error("unrecognized command: \"", command, "\"")
-			}
-		} else {
-			switch args[0] {
-			case "crashVoteREQ":
-				crashVoteREQ(args[1:])
-			case "crashPartialPreCommit":
-				crashPretialPreCommit(args[1:])
-			case "crashPartialCommit":
-				crashPartialCommit(args[1:])
-			default:
-				Error("unrecognized command: \"", command, "\"")
-			}
-		}
+		Error("unrecognized command: \"", command, "\"")
 	}
 }
 
@@ -203,7 +189,7 @@ func addCoordinator(args []string) {
 
 	// send VOTE-REQ to all participants
 	// AND wait for vote messages from all participants
-	resps, err := broadcastToParticipantsAndAwaitResponses(
+	resps, err := sendVoteREQToParticipantsAndAwaitResponses(
 		fmt.Sprintf("vote-req add %s %s", song, url))
 	defer func() {
 		for _, resp := range resps {
@@ -258,8 +244,6 @@ func addCoordinator(args []string) {
 		// send abort to master
 		MessagesToMaster.Enqueue("ack abort")
 	}
-
-	return
 }
 
 // TODO
@@ -271,7 +255,7 @@ func deleteCoordinator(args []string) {
 
 	// send VOTE-REQ to all participants
 	// AND wait for vote messages from all participants
-	resps, err := broadcastToParticipantsAndAwaitResponses(
+	resps, err := sendVoteREQToParticipantsAndAwaitResponses(
 		"vote-req delete " + song)
 	defer func() {
 		for _, resp := range resps {
@@ -326,8 +310,6 @@ func deleteCoordinator(args []string) {
 		// send abort to master
 		MessagesToMaster.Enqueue("ack abort")
 	}
-
-	return
 }
 
 func updateCoordinator(update string, args []string) {
@@ -347,7 +329,7 @@ func updateCoordinator(update string, args []string) {
 
 	// send VOTE-REQ to all participants
 	// AND wait for vote messages from all participants
-	resps, err := broadcastToParticipantsAndAwaitResponses(
+	resps, err := sendVoteREQToParticipantsAndAwaitResponses(
 		fmt.Sprintf("vote-req %s", operation))
 	defer func() {
 		for _, resp := range resps {
@@ -406,7 +388,7 @@ func updateCoordinator(update string, args []string) {
 	return
 }
 
-func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error) {
+func sendVoteREQToParticipantsAndAwaitResponses(msg string) ([]response, error) {
 	type connection struct {
 		c  net.Conn
 		id int
@@ -425,6 +407,9 @@ func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error) {
 	participants := LastTimestamp.GetAlive(time.Now())
 	// TODO: REMOVE
 	fmt.Println("broadcast participants:", participants)
+	if CrashVoteREQ && len(CrashVoteREQList) == 0 {
+		Fatal(ID, "CrashVoteREQ")
+	}
 	for _, id := range participants {
 		if id == ID {
 			continue
@@ -438,6 +423,20 @@ func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error) {
 				conns = append(conns, connection{conn, id})
 			} else {
 				conn.Close()
+			}
+		}
+
+		if CrashVoteREQ {
+			for i, tid := range CrashVoteREQList {
+				if id == tid {
+					copy(CrashVoteREQList[i:], CrashVoteREQList[i+1:])
+					CrashVoteREQList = CrashVoteREQList[:len(CrashVoteREQList)-1]
+					break
+				}
+			}
+
+			if len(CrashVoteREQList) == 0 {
+				Fatal(ID, "CrashVoteREQ")
 			}
 		}
 	}
@@ -477,6 +476,12 @@ func sendAbortToYesVoters(resps []response) {
 }
 
 func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
+	if msg == "pre-commit" && CrashPartialPreCommit && len(CrashPartialPreCommitList) == 0 {
+		Fatal(ID, "CrashPartialPreCommit")
+	} else if msg == "commit" && CrashPartialCommit && len(CrashPartialCommitList) == 0 {
+		Fatal(ID, "CrashPartialCommit")
+	}
+
 	// send message to participants
 	for i, ptc := range participants {
 		if ptc.id == ID {
@@ -486,6 +491,32 @@ func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
 		_, err := fmt.Fprintln(ptc.c, msg)
 		if err != nil {
 			participants[i].c = nil
+		}
+
+		if msg == "pre-commit" && CrashPartialPreCommit {
+			for j, tid := range CrashPartialPreCommitList {
+				if ptc.id == tid {
+					copy(CrashPartialPreCommitList[j:], CrashPartialPreCommitList[j+1:])
+					CrashPartialPreCommitList = CrashPartialPreCommitList[:len(CrashPartialPreCommitList)-1]
+					break
+				}
+			}
+
+			if len(CrashPartialPreCommitList) == 0 {
+				Fatal(ID, "CrashPartialPreCommit")
+			}
+		} else if msg == "commit" && CrashPartialCommit {
+			for j, tid := range CrashPartialCommitList {
+				if ptc.id == tid {
+					copy(CrashPartialCommitList[j:], CrashPartialCommitList[j+1:])
+					CrashPartialCommitList = CrashPartialCommitList[:len(CrashPartialCommitList)-1]
+					break
+				}
+			}
+
+			if len(CrashPartialCommitList) == 0 {
+				Fatal(ID, "CrashPartialCommit")
+			}
 		}
 	}
 
@@ -515,9 +546,15 @@ func addParticipant(conn net.Conn, song, url string) {
 	if vote == "yes" {
 		// write yes record in DT log
 		writeToDtLog("yes add", song, url)
+		if CrashBeforeVote {
+			Fatal(ID, "CrashBeforeVote")
+		}
 
 		// vote yes
 		fmt.Fprintln(conn, "yes")
+		if CrashAfterVote {
+			Fatal(ID, "CrashAfterVote")
+		}
 
 		// wait for message from coordinator
 		rdr := bufio.NewReader(conn)
@@ -533,6 +570,9 @@ func addParticipant(conn net.Conn, song, url string) {
 		if msg == "pre-commit" {
 			// send ack to coordinator
 			fmt.Fprintln(conn, "ack")
+			if CrashAfterAck {
+				Fatal(ID, "CrashAfterAck")
+			}
 
 			// wait for commit from coordinator
 			msg, err := rdr.ReadString('\n')
@@ -572,9 +612,15 @@ func addParticipant(conn net.Conn, song, url string) {
 func deleteParticipant(conn net.Conn, song string) {
 	// write yes record in DT log
 	writeToDtLog("yes delete", song)
+	if CrashBeforeVote {
+		Fatal(ID, "CrashBeforeVote")
+	}
 
 	// vote yes
 	fmt.Fprintln(conn, "yes")
+	if CrashAfterVote {
+		Fatal(ID, "CrashAfterVote")
+	}
 
 	// wait for message from coordinator
 	rdr := bufio.NewReader(conn)
@@ -590,6 +636,9 @@ func deleteParticipant(conn net.Conn, song string) {
 	if msg == "pre-commit" {
 		// send ack to coordinator
 		fmt.Fprintln(conn, "ack")
+		if CrashAfterAck {
+			Fatal(ID, "CrashAfterAck")
+		}
 
 		// wait for commit from coordinator
 		msg, err := rdr.ReadString('\n')
@@ -677,15 +726,50 @@ func initiateElectionProtocol() (elected bool, participants []int) {
 ///////////////////////////////////////////////////////////////////////////////
 
 func crash() {
-	Fatal("CRASH")
+	Fatal("Crash")
 }
 
-func crashAfterVote()                     {}
-func crashBeforeVote()                    {}
-func crashAfterAck()                      {}
-func crashVoteREQ(args []string)          {}
-func crashPretialPreCommit(args []string) {}
-func crashPartialCommit(args []string)    {}
+func crashAfterVote() {
+	CrashAfterVote = true
+}
+
+func crashBeforeVote() {
+	CrashBeforeVote = true
+}
+
+func crashAfterAck() {
+	CrashAfterAck = true
+}
+
+func crashVoteREQ(args []string) {
+	CrashVoteREQ = true
+	for _, s := range args {
+		i, err := strconv.Atoi(s)
+		if err == nil && i != ID {
+			CrashVoteREQList = append(CrashVoteREQList, i)
+		}
+	}
+}
+
+func crashPartialPreCommit(args []string) {
+	CrashPartialPreCommit = true
+	for _, s := range args {
+		i, err := strconv.Atoi(s)
+		if err == nil && i != ID {
+			CrashPartialPreCommitList = append(CrashPartialPreCommitList, i)
+		}
+	}
+}
+
+func crashPartialCommit(args []string) {
+	CrashPartialCommit = true
+	for _, s := range args {
+		i, err := strconv.Atoi(s)
+		if err == nil && i != ID {
+			CrashPartialCommitList = append(CrashPartialCommitList, i)
+		}
+	}
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // DT log     								     //
