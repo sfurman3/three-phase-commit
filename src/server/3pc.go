@@ -184,12 +184,13 @@ func getCoordinator(conn net.Conn, song string) {
 		}
 	}
 
-	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	fmt.Fprintln(conn, "resp", url)
 }
 
 // TODO
 func addCoordinator(args []string) {
+	// TODO: REMOVE
+	fmt.Println(ID, "add coordinator")
 	song := args[0]
 	url := args[1]
 	coordinatorVote := vote(url)
@@ -214,6 +215,9 @@ func addCoordinator(args []string) {
 
 		// send abort to all processes that voted yes
 		sendAbortToYesVoters(resps)
+
+		// TODO: REMOVE
+		fmt.Println(err, timeout)
 
 		// send abort to master
 		MessagesToMaster.Enqueue("ack abort")
@@ -274,8 +278,14 @@ func deleteCoordinator(args []string) {
 
 	// send VOTE-REQ to all participants
 	// AND wait for vote messages from all participants
+	var resps []response
 	resps, err, timeout := broadcastToParticipantsAndAwaitResponses(
 		"vote-req delete " + song)
+	defer func() {
+		for _, r := range resps {
+			r.c.Close()
+		}
+	}()
 	if timeout {
 		// write abort record in DT log
 		writeToDtLog("abort delete", song)
@@ -354,9 +364,12 @@ func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error, bo
 		}
 
 		var conn net.Conn
+		// TODO: REMOVE
+		fmt.Println("sending request to port", START_PORT+id)
 		conn, err = net.Dial("tcp", ":"+strconv.Itoa(START_PORT+id))
+		// TODO: REMOVE
+		fmt.Println("sent request to port", START_PORT+id)
 		if err == nil {
-			conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 			_, err = fmt.Fprintln(conn, msgJSON)
 			if err == nil {
 				conns = append(conns, connection{conn, id})
@@ -368,7 +381,6 @@ func broadcastToParticipantsAndAwaitResponses(msg string) ([]response, error, bo
 
 	// wait for responses from all recipients
 	for _, conn := range conns {
-		conn.c.SetDeadline(time.Now().Add(TIMEOUT))
 		r := bufio.NewReader(conn.c)
 
 		var resp string
@@ -409,7 +421,6 @@ func broadcastToParticipantsAndAwaitResponsesTermination(participants []int, msg
 		var conn net.Conn
 		conn, err = net.Dial("tcp", ":"+strconv.Itoa(START_PORT+id))
 		if err == nil {
-			conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 			_, err = fmt.Fprintln(conn, msgJSON)
 			if err == nil {
 				conns = append(conns, connection{conn, id})
@@ -421,7 +432,6 @@ func broadcastToParticipantsAndAwaitResponsesTermination(participants []int, msg
 
 	// wait for responses from all recipients
 	for _, conn := range conns {
-		conn.c.SetDeadline(time.Now().Add(TIMEOUT))
 		r := bufio.NewReader(conn.c)
 
 		var resp string
@@ -448,7 +458,6 @@ func sendAbortToYesVoters(resps []response) {
 			conn, err := net.Dial("tcp", ":"+strconv.Itoa(START_PORT+resp.id))
 			defer conn.Close()
 			if err == nil {
-				conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 				fmt.Fprintln(conn, abortJson)
 			}
 		}
@@ -462,7 +471,6 @@ func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
 	// wait for responses from all recipients
 	for _, ptc := range participants {
 		if ptc.c != nil {
-			ptc.c.SetDeadline(time.Now().Add(TIMEOUT))
 			r := bufio.NewReader(ptc.c)
 
 			// read ack from recipient
@@ -474,7 +482,6 @@ func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
 func sendToParticipants(participants []response, msg string) {
 	// send message to participants
 	for i, ptc := range participants {
-		ptc.c.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		_, err := fmt.Fprintln(ptc.c, msg)
 		if err != nil {
 			participants[i].c = nil
@@ -489,7 +496,6 @@ func sendToUncertainParticipantsAndAwaitAcks(participants []response, msg string
 	// wait for responses from all recipients
 	for _, ptc := range participants {
 		if ptc.c != nil && ptc.v == "uncertain" {
-			ptc.c.SetDeadline(time.Now().Add(TIMEOUT))
 			r := bufio.NewReader(ptc.c)
 
 			// read ack from recipient
@@ -502,7 +508,6 @@ func sendToUncertainParticipants(participants []response, msg string) {
 	// send message to participants
 	for i, ptc := range participants {
 		if ptc.v == "uncertain" {
-			ptc.c.SetWriteDeadline(time.Now().Add(TIMEOUT))
 			_, err := fmt.Fprintln(ptc.c, msg)
 			if err != nil {
 				participants[i].c = nil
@@ -517,18 +522,18 @@ func sendToUncertainParticipants(participants []response, msg string) {
 
 func getParticipant(conn net.Conn, song string) {
 	url := LocalPlaylist.GetSongUrl(song)
-	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	fmt.Fprintln(conn, "resp", url)
 }
 
 func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
+	// TODO: REMOVE
+	fmt.Println(ID, "add participant")
 	vote := vote(url)
 	if vote == "yes" {
 		// write yes record in DT log
 		writeToDtLog("yes add", song, url)
 
 		// vote yes
-		conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		fmt.Fprintln(conn, "yes")
 
 		// wait for message from coordinator
@@ -544,12 +549,11 @@ func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
 				// termination protocol
 
 				// wait for connection from coordinator
-				lnr := (ln).(*net.TCPListener)
-				defer lnr.SetDeadline(time.Time{})
 			startYes:
-				lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
-				conn, err := lnr.Accept()
-				if netErr := err.(net.Error); netErr.Timeout() {
+				conn, err := ln.Accept()
+				if err != nil {
+					// TODO: REMOVE
+					Error(err)
 					elected, participants := initiateElectionProtocol()
 					if elected {
 						addTerminationProtocolCoordinator(participants, song, url)
@@ -571,7 +575,6 @@ func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
 			writeToDtLog("pre-commit add", song, url)
 
 			// send ack to coordinator
-			conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 			fmt.Fprintln(conn, "ack")
 
 			// wait for commit from coordinator
@@ -587,12 +590,11 @@ func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
 					// termination protocol
 
 					// wait for connection from coordinator
-					lnr := (ln).(*net.TCPListener)
-					defer lnr.SetDeadline(time.Time{})
 				startPrecommit:
-					lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
-					conn, err := lnr.Accept()
-					if netErr := err.(net.Error); netErr.Timeout() {
+					conn, err := ln.Accept()
+					if err != nil {
+						// TODO: REMOVE
+						Error(err)
 						elected, participants := initiateElectionProtocol()
 						if elected {
 							addTerminationProtocolCoordinator(participants, song, url)
@@ -627,7 +629,6 @@ func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
 		}
 	} else {
 		// vote no
-		conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		fmt.Fprintln(conn, "no")
 
 		// write abort record in DT log
@@ -640,7 +641,6 @@ func deleteParticipant(ln net.Listener, conn net.Conn, song string) {
 	writeToDtLog("yes delete", song)
 
 	// vote yes
-	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	fmt.Fprintln(conn, "yes")
 
 	// wait for message from coordinator
@@ -656,12 +656,11 @@ func deleteParticipant(ln net.Listener, conn net.Conn, song string) {
 			// termination protocol
 
 			// wait for connection from coordinator
-			lnr := (ln).(*net.TCPListener)
-			defer lnr.SetDeadline(time.Time{})
 		startYes:
-			lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
-			conn, err := lnr.Accept()
-			if netErr := err.(net.Error); netErr.Timeout() {
+			conn, err := ln.Accept()
+			if err != nil {
+				// TODO: REMOVE
+				Error(err)
 				elected, participants := initiateElectionProtocol()
 				if elected {
 					deleteTerminationProtocolCoordinator(participants, song)
@@ -683,7 +682,6 @@ func deleteParticipant(ln net.Listener, conn net.Conn, song string) {
 		writeToDtLog("pre-commit delete", song)
 
 		// send ack to coordinator
-		conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		fmt.Fprintln(conn, "ack")
 
 		// wait for commit from coordinator
@@ -699,12 +697,11 @@ func deleteParticipant(ln net.Listener, conn net.Conn, song string) {
 				// termination protocol
 
 				// wait for connection from coordinator
-				lnr := (ln).(*net.TCPListener)
-				defer lnr.SetDeadline(time.Time{})
 			startPrecommit:
-				lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
-				conn, err := lnr.Accept()
-				if netErr := err.(net.Error); netErr.Timeout() {
+				conn, err := ln.Accept()
+				if err != nil {
+					// TODO: REMOVE
+					Error(err)
 					elected, participants := initiateElectionProtocol()
 					if elected {
 						deleteTerminationProtocolCoordinator(participants, song)
@@ -748,7 +745,6 @@ func waitForMessageFromCoordinator(conn net.Conn) (string, error, bool) {
 	r := bufio.NewReader(conn)
 	// increase the TIMEOUT because a msg must be sent to each other
 	// participant
-	conn.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 	response, err := r.ReadString('\n')
 	if err != nil {
 		netErr, ok := err.(net.Error)
@@ -804,7 +800,6 @@ func addTerminationProtocolParticipant(conn net.Conn, song, url string) {
 	c := bufio.NewReader(conn)
 start:
 	// wait for state-req from coordinator
-	conn.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 	_, err := c.ReadString('\n')
 	if netErr := err.(net.Error); netErr.Timeout() {
 		elected, participants := initiateElectionProtocol()
@@ -828,11 +823,9 @@ start:
 	}
 
 	// send state to coordinator
-	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	fmt.Fprintln(conn, state)
 
 	// wait for response from coordinator
-	conn.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 	resp, err := c.ReadString('\n')
 	if netErr := err.(net.Error); netErr.Timeout() {
 		elected, participants := initiateElectionProtocol()
@@ -856,11 +849,9 @@ start:
 		// response was pre-commit
 
 		// send ack to coordinator
-		conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		fmt.Fprintln(conn, "ack")
 
 		// wait for commit from coordinator
-		conn.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 		resp, err := c.ReadString('\n')
 		if netErr := err.(net.Error); netErr.Timeout() {
 			elected, participants := initiateElectionProtocol()
@@ -882,7 +873,6 @@ func deleteTerminationProtocolParticipant(conn net.Conn, song string) {
 	c := bufio.NewReader(conn)
 start:
 	// wait for state-req from coordinator
-	conn.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 	_, err := c.ReadString('\n')
 	if netErr := err.(net.Error); netErr.Timeout() {
 		elected, participants := initiateElectionProtocol()
@@ -906,11 +896,9 @@ start:
 	}
 
 	// send state to coordinator
-	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	fmt.Fprintln(conn, state)
 
 	// wait for response from coordinator
-	conn.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 	resp, err := c.ReadString('\n')
 	if netErr := err.(net.Error); netErr.Timeout() {
 		elected, participants := initiateElectionProtocol()
@@ -934,11 +922,9 @@ start:
 		// response was pre-commit
 
 		// send ack to coordinator
-		conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 		fmt.Fprintln(conn, "ack")
 
 		// wait for commit from coordinator
-		conn.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 		resp, err := c.ReadString('\n')
 		if netErr := err.(net.Error); netErr.Timeout() {
 			elected, participants := initiateElectionProtocol()

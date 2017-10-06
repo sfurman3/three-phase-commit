@@ -8,8 +8,15 @@ import (
 )
 
 type tsMsgQueue struct {
-	value []*Message
-	mutex sync.Mutex // mutex for accessing contents
+	value    []*Message
+	mutex    sync.Mutex // mutex for accessing contents
+	messages *sync.Cond // any messages enqueued
+}
+
+func NewMessageQueue() tsMsgQueue {
+	var tsq tsMsgQueue
+	tsq.messages = sync.NewCond(&tsq.mutex)
+	return tsq
 }
 
 func (tsq *tsMsgQueue) Enqueue(msg *Message) {
@@ -21,6 +28,9 @@ func (tsq *tsMsgQueue) Enqueue(msg *Message) {
 func (tsq *tsMsgQueue) Dequeue() *Message {
 	tsq.mutex.Lock()
 	var v *Message
+	for len(tsq.value) == 0 {
+		tsq.messages.Wait()
+	}
 	if len(tsq.value) > 0 {
 		v = tsq.value[0]
 		tsq.value = tsq.value[1:]

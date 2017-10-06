@@ -61,7 +61,7 @@ const (
 	ALIVE_INTERVAL = 200 * time.Millisecond
 
 	// Timeout for waiting for a response from the coordinator
-	TIMEOUT = 10 * time.Millisecond
+	TIMEOUT = 10000 * time.Millisecond
 
 	// Constants for printing error messages to the terminal
 	BOLD_RED = "\033[31;1m"
@@ -102,6 +102,7 @@ func init() {
 
 	LocalPlaylist = NewPlaylist()
 
+	MessagesFIFO = NewMessageQueue()
 	LastTimestamp.value = make([]time.Time, NUM_PROCS)
 
 	DeadLastRound = make([]bool, NUM_PROCS)
@@ -117,15 +118,17 @@ func init() {
 
 func main() {
 	// bind the server-facing port
+	// TODO: REMOVE
+	fmt.Println(ID, "is waiting for a message on port", PORT)
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(PORT))
 	if err != nil {
 		Fatal("failed to bind server-facing port: ", strconv.Itoa(PORT))
 	}
 
 	go heartbeat()
+	go fetchMessages(ln)
 	determineInitialCoordinator(ln)
 
-	go fetchMessages(ln)
 	go serveMaster()
 
 	// TODO: REMOVE?
@@ -145,31 +148,7 @@ func determineInitialCoordinator(ln net.Listener) {
 	// broadcast some empty messages to indicate the server is alive
 	broadcast(emptyMessage())
 
-	// listen for messages from operational servers -> updating LastTimestamp
-	lnr := (ln).(*net.TCPListener)
-	defer lnr.SetDeadline(time.Time{})
-	// TODO: change to NUM_PROCS*2
-	for i := 0; i < 100; i++ {
-		lnr.SetDeadline(time.Now().Add(TIMEOUT))
-		conn, err := lnr.Accept()
-		if err != nil {
-			continue
-		}
-
-		handleMessage(ln, conn)
-	}
-	// TODO: CHANGE to HEARTBEAT_INTERVAL?
 	time.Sleep(1000 * time.Millisecond) // wait for other servers to spin up
-	// TODO: change to NUM_PROCS*2
-	for i := 0; i < 100; i++ {
-		lnr.SetDeadline(time.Now().Add(TIMEOUT))
-		conn, err := lnr.Accept()
-		if err != nil {
-			continue
-		}
-
-		handleMessage(ln, conn)
-	}
 
 	// determine the coordinator's identity
 	COORDINATOR = LastTimestamp.LowestIdAlive()
@@ -194,14 +173,12 @@ func heartbeat() {
 // log, listening on PORT (i.e. START_PORT + PORT)
 func fetchMessages(ln net.Listener) {
 	for {
-		// TODO: REMOVE
-		fmt.Println(ID, "waiting for a message")
 		conn, err := ln.Accept()
 		if err != nil {
 			continue
 		}
 
-		handleMessage(ln, conn)
+		go handleMessage(ln, conn)
 	}
 }
 
@@ -225,7 +202,6 @@ func handleMessage(ln net.Listener, conn net.Conn) {
 	defer conn.Close()
 
 	messenger := bufio.NewReader(conn)
-	conn.SetReadDeadline(time.Now().Add(TIMEOUT))
 	msgBytes, err := messenger.ReadBytes('\n')
 	if err != nil {
 		return
@@ -328,14 +304,12 @@ func handleMaster(masterConn net.Conn) {
 		// send the next pending message to master
 		msg := MessagesToMaster.Dequeue()
 		if msg != "" {
-			masterConn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 			if _, err := fmt.Fprintln(masterConn, msg); err != nil {
 				MessagesToMaster.PushFront(msg)
 			}
 		}
 
 		// check for a new command from master
-		masterConn.SetReadDeadline(time.Now().Add(TIMEOUT))
 		command, err := master.ReadString('\n')
 		if err != nil {
 			netErr, ok := err.(net.Error)
@@ -436,7 +410,6 @@ func sendMarshaled(msg string, id int) error {
 	}
 	defer conn.Close()
 
-	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	_, err = fmt.Fprintln(conn, msg)
 	return err
 }
@@ -457,14 +430,12 @@ func sendAndWaitForResponse(msg string, id int) ([]byte, error) {
 	}
 	defer conn.Close()
 
-	conn.SetWriteDeadline(time.Now().Add(TIMEOUT))
 	_, err = fmt.Fprintln(conn, msg)
 	if err != nil {
 		return nil, err
 	}
 
 	r := bufio.NewReader(conn)
-	conn.SetReadDeadline(time.Now().Add(TIMEOUT))
 	resp, err := r.ReadBytes('\n')
 	if err != nil {
 		if netErr := err.(net.Error); netErr.Timeout() {
