@@ -14,23 +14,24 @@ type tsMsgQueue struct {
 
 func (tsq *tsMsgQueue) Enqueue(msg *Message) {
 	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
 	tsq.value = append(tsq.value, msg)
-	tsq.mutex.Unlock()
 }
 
 func (tsq *tsMsgQueue) Dequeue() *Message {
 	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
 	var v *Message
 	if len(tsq.value) > 0 {
 		v = tsq.value[0]
 		tsq.value = tsq.value[1:]
 	}
-	tsq.mutex.Unlock()
 	return v
 }
 
 func (tsq *tsMsgQueue) WriteMessages(rwr *bufio.ReadWriter) {
 	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
 	if len(tsq.value) > 0 {
 		msgs := tsq.value
 		lst := len(msgs) - 1
@@ -40,7 +41,6 @@ func (tsq *tsMsgQueue) WriteMessages(rwr *bufio.ReadWriter) {
 		}
 		rwr.WriteString(msgs[lst].Content)
 	}
-	tsq.mutex.Unlock()
 }
 
 type tsTimestampQueue struct {
@@ -50,20 +50,21 @@ type tsTimestampQueue struct {
 
 // NOTE: assumes message IDs are in {0..n-1}
 func (tsq *tsTimestampQueue) UpdateTimestamp(msg *Message) {
-	LastTimestamp.mutex.Lock()
-	LastTimestamp.value[msg.Id] = msg.Rts
-	LastTimestamp.mutex.Unlock()
+	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
+	tsq.value[msg.Id] = msg.Rts
 }
 
 func (tsq *tsTimestampQueue) UpdateTimestampById(id int) {
-	LastTimestamp.mutex.Lock()
-	LastTimestamp.value[id] = time.Now()
-	LastTimestamp.mutex.Unlock()
+	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
+	tsq.value[id] = time.Now()
 }
 
 func (tsq *tsTimestampQueue) WriteAlive(rwr *bufio.ReadWriter, now time.Time) {
-	LastTimestamp.mutex.Lock()
-	stmps := LastTimestamp.value
+	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
+	stmps := tsq.value
 	for id := 0; id < ID; id++ {
 		// add all server ids for which a
 		// heartbeat was sent within the
@@ -83,14 +84,14 @@ func (tsq *tsTimestampQueue) WriteAlive(rwr *bufio.ReadWriter, now time.Time) {
 			rwr.WriteString(strconv.Itoa(id))
 		}
 	}
-	LastTimestamp.mutex.Unlock()
 }
 
 func (tsq *tsTimestampQueue) GetAlive(now time.Time) []int {
 	var alive []int
 
-	LastTimestamp.mutex.Lock()
-	stmps := LastTimestamp.value
+	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
+	stmps := tsq.value
 	for id := 0; id < ID; id++ {
 		// add all server ids for which a
 		// heartbeat was sent within the
@@ -108,26 +109,25 @@ func (tsq *tsTimestampQueue) GetAlive(now time.Time) []int {
 			alive = append(alive, id)
 		}
 	}
-	LastTimestamp.mutex.Unlock()
 
 	return alive
 }
 
 func (tsq *tsTimestampQueue) IsAlive(id int) bool {
-	LastTimestamp.mutex.Lock()
-	if id != -1 && time.Now().Sub(LastTimestamp.value[id]) < ALIVE_INTERVAL {
-		LastTimestamp.mutex.Unlock()
+	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
+	if id != -1 && time.Now().Sub(tsq.value[id]) < ALIVE_INTERVAL {
 		return true
 	}
-	LastTimestamp.mutex.Unlock()
 	return false
 }
 
 func (tsq *tsTimestampQueue) LowestIdAlive() int {
 	now := time.Now()
 
-	LastTimestamp.mutex.Lock()
-	stmps := LastTimestamp.value
+	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
+	stmps := tsq.value
 	for id := 0; id < ID; id++ {
 		// add all server ids for which a
 		// heartbeat was sent within the
@@ -136,7 +136,6 @@ func (tsq *tsTimestampQueue) LowestIdAlive() int {
 			return id
 		}
 	}
-	LastTimestamp.mutex.Unlock()
 
 	return ID
 }
@@ -148,23 +147,23 @@ type tsStringQueue struct {
 
 func (tsq *tsStringQueue) Enqueue(v string) {
 	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
 	tsq.value = append(tsq.value, v)
-	tsq.mutex.Unlock()
 }
 
 func (tsq *tsStringQueue) PushFront(v string) {
 	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
 	tsq.value = append([]string{v}, tsq.value...)
-	tsq.mutex.Unlock()
 }
 
 func (tsq *tsStringQueue) Dequeue() string {
 	tsq.mutex.Lock()
+	defer tsq.mutex.Unlock()
 	var v string
 	if len(tsq.value) > 0 {
 		v = tsq.value[0]
 		tsq.value = tsq.value[1:]
 	}
-	tsq.mutex.Unlock()
 	return v
 }

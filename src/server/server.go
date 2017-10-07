@@ -196,12 +196,14 @@ func heartbeat() {
 			for id := 0; id < ID; id++ {
 				conn, err := net.Dial("tcp", ":"+strconv.Itoa(END_PORT-id))
 				if err == nil {
+					defer conn.Close()
 					fmt.Fprintln(conn, ID)
 				}
 			}
 			for id := ID + 1; id < NUM_PROCS; id++ {
 				conn, err := net.Dial("tcp", ":"+strconv.Itoa(END_PORT-id))
 				if err == nil {
+					defer conn.Close()
 					fmt.Fprintln(conn, ID)
 				}
 			}

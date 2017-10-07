@@ -145,6 +145,8 @@ func getCoordinator(conn net.Conn, song string) {
 				continue
 			}
 
+			// TODO: REMOVE
+			fmt.Println(ID, LastTimestamp.GetAlive(time.Now()))
 			resp, err := sendAndWaitForResponse(mJson, id)
 			if err != nil {
 				continue
@@ -698,7 +700,7 @@ func waitForMessageFromCoordinator(conn net.Conn) (string, error, bool) {
 
 func initiateElectionProtocol() (elected bool, participants []int) {
 	// TODO: REMOVE
-	fmt.Println(ID, "electing a new coordinator")
+	fmt.Println(ID, "electing a new coordinator", COORDINATOR)
 	alive := LastTimestamp.GetAlive(time.Now())
 	for ; len(alive) > 0 && COORDINATOR >= alive[0]; alive = alive[1:] {
 	}
