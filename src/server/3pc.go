@@ -157,13 +157,13 @@ func getCoordinator(conn net.Conn, song string) {
 				if args[0] == "resp" && args[1] != "NONE" {
 					url = string(args[1])
 					LocalPlaylist.AddOrUpdateSong(song, url)
-					// TODO: Write the new value to the DT
-					// log?
+					// TODO: DELETE?
 					//
-					// MAYBE NOT because you might get a
-					// value that is about to be removed in
-					// a current commit and then you'll
+					// MAYBE because you might get a value
+					// that is about to be removed in a
+					// current commit and then you'll
 					// create an inconsistent state
+					writeToDtLog("commit add", song, url)
 					break
 				}
 			}
