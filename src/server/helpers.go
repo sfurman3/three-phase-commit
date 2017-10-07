@@ -4,19 +4,17 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"runtime/debug"
 	"strconv"
 )
 
 // Error logs the given error
 func Error(err ...interface{}) {
-	debug.PrintStack()
 	log.Println(ID, ERROR+" "+fmt.Sprint(err...))
 }
 
 // Fail logs the given error and exits with status 1
 func Fatal(err ...interface{}) {
-	log.Fatalln(ERROR + " " + fmt.Sprint(err...))
+	log.Fatal(ERROR + " " + fmt.Sprintln(err...))
 }
 
 // setArgsPositional parses the first three command line arguments into ID,

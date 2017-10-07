@@ -239,7 +239,7 @@ func fetchMessages(ln net.Listener) {
 
 		if err == nil {
 			lock.Lock()
-			handleMessage(conn)
+			handleMessage(ln, conn)
 			lock.Unlock()
 		}
 	}
@@ -261,7 +261,7 @@ func fetchMessages(ln net.Listener) {
 // MessagesFIFO by send timestamp in order to approximate the send order. We
 // could also use a causal delivery method provided by a data structure such as
 // the vector.MessageReceptacle to deliver messages based on causal precedence.
-func handleMessage(conn net.Conn) {
+func handleMessage(ln net.Listener, conn net.Conn) {
 	defer conn.Close()
 
 	messenger := bufio.NewReader(conn)
@@ -273,6 +273,13 @@ func handleMessage(conn net.Conn) {
 	msg := new(Message)
 	err = json.Unmarshal(msgBytes, msg)
 	if err != nil {
+		req := string(msgBytes)
+		args := strings.Split(req, " ")
+		if args[0] != "state-req" {
+			return
+		}
+
+		handleStateReq(ln, conn, req, args)
 		return
 	}
 
@@ -301,10 +308,10 @@ func handleMessage(conn net.Conn) {
 	case "vote-req":
 		if argLengthAtLeast(3) {
 			if args[1] == "delete" {
-				deleteParticipant(conn, args[2])
+				deleteParticipant(ln, conn, args[2])
 			} else if argLengthAtLeast(4) {
 				if args[1] == "add" {
-					addParticipant(conn, args[2], args[3])
+					addParticipant(ln, conn, args[2], args[3])
 				} else {
 					Error("no such vote-req operation: \"",
 						strings.Join(args, " "), "\"")
@@ -316,6 +323,7 @@ func handleMessage(conn net.Conn) {
 		}
 	default:
 		// TODO
+		fmt.Println(ID, "ignored", msg.Content)
 	}
 
 	// TODO: REMOVE

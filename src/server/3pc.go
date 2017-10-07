@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"strconv"
@@ -445,7 +447,6 @@ func sendVoteREQToParticipantsAndAwaitResponses(msg string) ([]response, error) 
 
 	// wait for responses from all recipients
 	for _, conn := range conns {
-		conn.c.SetDeadline(time.Now().Add(TIMEOUT))
 		r := bufio.NewReader(conn.c)
 
 		var resp string
@@ -525,7 +526,6 @@ func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
 	// wait for responses from all recipients
 	for _, ptc := range participants {
 		if ptc.c != nil {
-			ptc.c.SetDeadline(time.Now().Add(TIMEOUT))
 			r := bufio.NewReader(ptc.c)
 
 			// read ack from recipient
@@ -543,7 +543,7 @@ func getParticipant(conn net.Conn, song string) {
 	fmt.Fprintln(conn, "resp", url)
 }
 
-func addParticipant(conn net.Conn, song, url string) {
+func addParticipant(ln net.Listener, conn net.Conn, song, url string) {
 	vote := vote(url)
 	if vote == "yes" {
 		// write yes record in DT log
@@ -563,13 +563,17 @@ func addParticipant(conn net.Conn, song, url string) {
 		msg, err := rdr.ReadString('\n')
 		msg = strings.TrimSpace(msg)
 		if err != nil {
-			// TODO: REMOVE
-			Error(err, COORDINATOR, msg)
-			initiateElectionProtocol()
+			initiateElectionAndTerminationProtocol(ln, song, fmt.Sprintf("add %s %s", song, url),
+				func(ptcps []int) {
+					addTerminationProtocolCoordinator(ptcps, song, url)
+				})
 			return
 		}
 
 		if msg == "pre-commit" {
+			// write pre-commit record in DT log
+			writeToDtLog("pre-commit add", song, url)
+
 			// send ack to coordinator
 			fmt.Fprintln(conn, "ack")
 			if CrashAfterAck {
@@ -580,9 +584,10 @@ func addParticipant(conn net.Conn, song, url string) {
 			msg, err := rdr.ReadString('\n')
 			msg = strings.TrimSpace(msg)
 			if err != nil {
-				// TODO: REMOVE
-				Error(err, COORDINATOR, msg)
-				initiateElectionProtocol()
+				initiateElectionAndTerminationProtocol(ln, song, fmt.Sprintf("add %s %s", song, url),
+					func(ptcps []int) {
+						addTerminationProtocolCoordinator(ptcps, song, url)
+					})
 				return
 			}
 
@@ -611,7 +616,7 @@ func addParticipant(conn net.Conn, song, url string) {
 	}
 }
 
-func deleteParticipant(conn net.Conn, song string) {
+func deleteParticipant(ln net.Listener, conn net.Conn, song string) {
 	// write yes record in DT log
 	writeToDtLog("yes delete", song)
 	if CrashBeforeVote {
@@ -629,13 +634,17 @@ func deleteParticipant(conn net.Conn, song string) {
 	msg, err := rdr.ReadString('\n')
 	msg = strings.TrimSpace(msg)
 	if err != nil {
-		// TODO: REMOVE
-		Error(err, COORDINATOR, msg)
-		initiateElectionProtocol()
+		initiateElectionAndTerminationProtocol(ln, song, fmt.Sprintf("delete %s", song),
+			func(ptcps []int) {
+				deleteTerminationProtocolCoordinator(ptcps, song)
+			})
 		return
 	}
 
 	if msg == "pre-commit" {
+		// write pre-commit record in DT log
+		writeToDtLog("pre-commit delete", song)
+
 		// send ack to coordinator
 		fmt.Fprintln(conn, "ack")
 		if CrashAfterAck {
@@ -646,9 +655,10 @@ func deleteParticipant(conn net.Conn, song string) {
 		msg, err := rdr.ReadString('\n')
 		msg = strings.TrimSpace(msg)
 		if err != nil {
-			// TODO: REMOVE
-			Error(err, COORDINATOR, msg)
-			initiateElectionProtocol()
+			initiateElectionAndTerminationProtocol(ln, song, fmt.Sprintf("delete %s", song),
+				func(ptcps []int) {
+					deleteTerminationProtocolCoordinator(ptcps, song)
+				})
 			return
 		}
 
@@ -682,37 +692,35 @@ func waitForMessageFromCoordinator(conn net.Conn) (string, error, bool) {
 	r := bufio.NewReader(conn)
 	// increase the TIMEOUT because a msg must be sent to each other
 	// participant
-	conn.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 	response, err := r.ReadString('\n')
 	if err != nil {
-		netErr, ok := err.(net.Error)
-		if ok && netErr.Timeout() {
-			Error("timed out when reading response from coordinator")
-			return "", err, true
-		} else {
-			Error(err)
-			return "", err, false
-		}
+		Error("timed out when reading response from coordinator")
+		return "", err, true
 	}
 
 	return strings.TrimSpace(response), nil, false
 }
 
-func initiateElectionProtocol() (elected bool, participants []int) {
+///////////////////////////////////////////////////////////////////////////////
+// election protocol                                                         //
+///////////////////////////////////////////////////////////////////////////////
+
+func initiateElectionProtocol(ptcps []int) (elected bool, participants []int) {
 	// TODO: REMOVE
-	fmt.Println(ID, "electing a new coordinator", COORDINATOR)
-	alive := LastTimestamp.GetAlive(time.Now())
-	for ; len(alive) > 0 && COORDINATOR >= alive[0]; alive = alive[1:] {
+	fmt.Println(ID, "electing a new coordinator; was", COORDINATOR)
+	for ; len(ptcps) > 0 && COORDINATOR >= ptcps[0]; ptcps = ptcps[1:] {
 	}
-	if len(alive) > 0 {
-		COORDINATOR = alive[0]
-		participants = alive[1:]
+	if len(ptcps) > 0 {
+		COORDINATOR = ptcps[0]
+		participants = ptcps[1:]
 	} else {
 		COORDINATOR = ID
 	}
 
 	// TODO: REMOVE
+	fmt.Print("\033[33m")
 	fmt.Println(ID, "elected", COORDINATOR)
+	fmt.Print("\033[0m")
 
 	if COORDINATOR == ID {
 		// tell the master that this server is the coordinator
@@ -723,8 +731,413 @@ func initiateElectionProtocol() (elected bool, participants []int) {
 	return elected, participants
 }
 
+func initiateElectionAndTerminationProtocol(ln net.Listener, song, operation string, terminationCoordinator func(ptcps []int)) {
+	elected, participants := initiateElectionProtocol(LastTimestamp.GetAlive(time.Now()))
+	// TODO: REMOVE
+	fmt.Println(ID, "initiateElectionAndTerminationProtocol", operation)
+	fmt.Println(ID, "elected:", elected, "participants", participants)
+	if elected {
+		terminationCoordinator(participants)
+	} else {
+		// TODO: REMOVE?
+		lnr := (ln).(*net.TCPListener)
+		//defer lnr.SetDeadline(time.Time{})
+
+	start:
+		// wait for state-req from coordinator
+		//lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
+		conn, err := lnr.Accept()
+		// TODO: FIXERUP
+		if err != nil {
+			elected, participants := initiateElectionProtocol(participants)
+			if elected {
+				terminationCoordinator(participants)
+			} else {
+				goto start
+			}
+		}
+
+		// read state-req from coordinator
+		c := bufio.NewReader(conn)
+		req, err := c.ReadString('\n')
+		req = strings.TrimSpace(req)
+		if err != nil {
+			elected, participants := initiateElectionProtocol(participants)
+			if elected {
+				terminationCoordinator(participants)
+			} else {
+				goto start
+			}
+		}
+
+		gotoStart := terminationProtocolParticipantBody(
+			conn, c, req, song, operation, participants, terminationCoordinator)
+		if gotoStart {
+			goto start
+		}
+	}
+}
+
+func handleStateReq(ln net.Listener, conn net.Conn, req string, args []string) {
+	// TODO: REMOVE?
+	lnr := (ln).(*net.TCPListener)
+	//defer lnr.SetDeadline(time.Time{})
+
+	var terminationCoordinator func(ptcps []int)
+	song := args[2]
+	operation := strings.Join(args[1:], " ")
+	switch args[1] {
+	case "add":
+		url := args[3]
+		terminationCoordinator = func(ptcps []int) {
+			addTerminationProtocolCoordinator(ptcps, song, url)
+		}
+	case "delete":
+		terminationCoordinator = func(ptcps []int) {
+			deleteTerminationProtocolCoordinator(ptcps, song)
+		}
+	default:
+		Fatal("invalid command", args)
+	}
+
+	c := bufio.NewReader(conn)
+	participants := LastTimestamp.GetAlive(time.Now())
+	gotoStart := terminationProtocolParticipantBody(
+		conn, c, req, song, operation, participants, terminationCoordinator)
+	if !gotoStart {
+		return
+	}
+
+start:
+	// wait for state-req from coordinator
+	//lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
+	conn.Close()
+	conn, err := lnr.Accept()
+	// TODO: FIXERUP
+	if err != nil {
+		elected, participants := initiateElectionProtocol(participants)
+		if elected {
+			terminationCoordinator(participants)
+		} else {
+			goto start
+		}
+	}
+
+	// read state-req from coordinator
+	c = bufio.NewReader(conn)
+	req, err = c.ReadString('\n')
+	req = strings.TrimSpace(req)
+	if err != nil {
+		elected, participants := initiateElectionProtocol(participants)
+		if elected {
+			terminationCoordinator(participants)
+		} else {
+			goto start
+		}
+	}
+
+	gotoStart = terminationProtocolParticipantBody(
+		conn, c, req, song, operation, participants, terminationCoordinator)
+	if gotoStart {
+		goto start
+	}
+}
+
+func terminationProtocolParticipantBody(conn net.Conn, c *bufio.Reader, req, song,
+	operation string, participants []int, terminationCoordinator func(ptcps []int)) (gotoStart bool) {
+
+	// TODO: REMOVE
+	req = strings.TrimSpace(req)
+	if strings.Split(req, " ")[0] != "state-req" {
+		Error("participant did not receive expected state-req: ", req)
+	}
+
+	var state string
+	vote, decision := readVoteOrDecisionFromLog(song)
+	if decision == "commit" {
+		state = "commit"
+	} else if decision == "pre-commit" {
+		state = "pre-commit"
+	} else if decision == "abort" || vote == "" {
+		state = "abort"
+	} else {
+		state = "uncertain"
+	}
+
+	// send state to coordinator
+	// TODO: REMOVE
+	fmt.Println("termination participant", ID, "sent", state)
+	_, err := fmt.Fprintln(conn, state)
+	if err != nil {
+		elected, participants := initiateElectionProtocol(participants)
+		if elected {
+			terminationCoordinator(participants)
+		} else {
+			gotoStart = true
+			return
+		}
+	}
+
+	// wait for response from coordinator
+	resp, err := c.ReadString('\n')
+	resp = strings.TrimSpace(resp)
+	if err != nil {
+		elected, participants := initiateElectionProtocol(participants)
+		if elected {
+			terminationCoordinator(participants)
+		} else {
+			gotoStart = true
+			return
+		}
+	}
+
+	// TODO: REMOVE
+	fmt.Println(ID, "received", resp, "from coordinator")
+	switch resp {
+	case "abort":
+		if noAbortInDtLog := decision == ""; noAbortInDtLog {
+			// TODO: REMOVE
+			fmt.Println(ID, "writing abort to log")
+			writeToDtLog("abort", operation)
+		}
+	case "commit":
+		if noCommitInDtLog := decision == ""; noCommitInDtLog {
+			writeToDtLog("commit", operation)
+			args := strings.Split(operation, " ")
+			switch args[0] {
+			case "add":
+				LocalPlaylist.AddOrUpdateSong(args[1], args[2])
+			case "delete":
+				LocalPlaylist.DeleteSong(args[1])
+			}
+		}
+	default:
+		// response was pre-commit
+
+		// send ack to coordinator
+		fmt.Fprintln(conn, "ack")
+
+		// wait for commit from coordinator
+		resp, err := c.ReadString('\n')
+		resp = strings.TrimSpace(resp)
+		if err != nil {
+			elected, participants := initiateElectionProtocol(participants)
+			if elected {
+				terminationCoordinator(participants)
+			} else {
+				gotoStart = true
+				return
+			}
+		}
+		if resp != "commit" {
+			Error("coordinator responded with \"", resp, "\" instead of 'commit'")
+		}
+
+		// TODO: REMOVE
+		fmt.Println(ID, "writing commit to log")
+		writeToDtLog("commit", operation)
+		args := strings.Split(operation, " ")
+		switch args[0] {
+		case "add":
+			LocalPlaylist.AddOrUpdateSong(args[1], args[2])
+		case "delete":
+			LocalPlaylist.DeleteSong(args[1])
+		}
+	}
+
+	return
+}
+
 ///////////////////////////////////////////////////////////////////////////////
-// crash      								     //
+// termination protocol coordinator                                          //
+///////////////////////////////////////////////////////////////////////////////
+
+// TODO: REVIEW
+func addTerminationProtocolCoordinator(participants []int, song, url string) {
+	// send STATE-REQ to all participants
+	// AND wait for state report messages
+	operation := fmt.Sprintf("add %s %s", song, url)
+	// TODO: REMOVE
+	fmt.Println(ID, "sending state-reqs")
+	resps := broadcastToParticipantsAndAwaitResponsesTermination(
+		participants, "state-req "+operation)
+	// TODO: REMOVE
+	fmt.Println(ID, "responses", resps)
+	defer func() {
+		for _, resp := range resps {
+			resp.c.Close()
+		}
+	}()
+	terminationProtocolCoordinatorBody(resps, song, operation)
+}
+
+// TODO: REVIEW
+func deleteTerminationProtocolCoordinator(participants []int, song string) {
+	// send STATE-REQ to all participants
+	// AND wait for state report messages
+	operation := "delete " + song
+	resps := broadcastToParticipantsAndAwaitResponsesTermination(
+		participants, "state-req "+operation)
+	defer func() {
+		for _, resp := range resps {
+			resp.c.Close()
+		}
+	}()
+	terminationProtocolCoordinatorBody(resps, song, operation)
+}
+
+// TODO: REVIEW
+func broadcastToParticipantsAndAwaitResponsesTermination(participants []int, msg string) []response {
+	type connection struct {
+		c  net.Conn
+		id int
+	}
+	var responses []response
+	var conns []connection
+
+	// send message to participants
+	for _, id := range participants {
+		if id == ID {
+			continue
+		}
+
+		conn, err := net.Dial("tcp", ":"+strconv.Itoa(START_PORT+id))
+		if err != nil {
+			continue
+		}
+
+		_, err = fmt.Fprintln(conn, msg)
+		if err == nil {
+			conns = append(conns, connection{conn, id})
+		} else {
+			conn.Close()
+		}
+	}
+
+	// wait for responses from all recipients
+	for _, conn := range conns {
+		r := bufio.NewReader(conn.c)
+		resp, err := r.ReadString('\n')
+		if err != nil {
+			conn.c.Close()
+			continue
+		}
+
+		resp = strings.TrimSpace(resp)
+		responses = append(responses, response{resp, conn.c, conn.id})
+	}
+
+	return responses
+}
+
+// TODO: REVIEW
+func terminationProtocolCoordinatorBody(resps []response, song, operation string) {
+	// check for decisions from participants
+	anyAborted := false
+	anyCommitted := false
+	allUncertain := true
+	for _, resp := range resps {
+		switch resp.v {
+		case "abort":
+			anyAborted = true
+			allUncertain = false
+			break
+		case "commit":
+			anyCommitted = true
+			allUncertain = false
+			break
+		case "uncertain":
+			// noop
+		default:
+			allUncertain = false
+		}
+	}
+
+	vote, decision := readVoteOrDecisionFromLog(song)
+	if coordAborted := decision == "abort"; anyAborted || coordAborted {
+		// case TR1
+		if !coordAborted {
+			writeToDtLog("abort", operation)
+		}
+		// TODO: REMOVE
+		fmt.Println("coordinator sending aborts to participants", resps)
+		sendToParticipants(resps, "abort")
+	} else if coordCommitted := decision == "commit"; anyCommitted || coordCommitted {
+		// case TR2
+		if !coordCommitted {
+			writeToDtLog("commit", operation)
+			args := strings.Split(operation, " ")
+			switch args[0] {
+			case "add":
+				LocalPlaylist.AddOrUpdateSong(args[1], args[2])
+			case "delete":
+				LocalPlaylist.DeleteSong(args[1])
+			}
+		}
+		sendToParticipants(resps, "commit")
+	} else if iAmUncertain := vote == "yes"; allUncertain && iAmUncertain {
+		// case TR3
+		// TODO: REMOVE
+		fmt.Println("coordinator voted yes; sending aborts to participants")
+		writeToDtLog("abort", operation)
+		sendToParticipants(resps, "abort")
+	} else {
+		// some processes are Commitable - case TR4
+		sendToUncertainParticipantsAndAwaitAcks(resps, "pre-commit")
+		writeToDtLog("commit", operation)
+		args := strings.Split(operation, " ")
+		switch args[0] {
+		case "add":
+			LocalPlaylist.AddOrUpdateSong(args[1], args[2])
+		case "delete":
+			LocalPlaylist.DeleteSong(args[1])
+		}
+		sendToUncertainParticipants(resps, "commit")
+	}
+}
+
+// TODO: REVIEW
+func sendToParticipants(participants []response, msg string) {
+	// send message to participants
+	for i, ptc := range participants {
+		_, err := fmt.Fprintln(ptc.c, msg)
+		if err != nil {
+			participants[i].c = nil
+		}
+	}
+}
+
+// TODO: REVIEW
+func sendToUncertainParticipantsAndAwaitAcks(participants []response, msg string) {
+	// send message to participants
+	sendToUncertainParticipants(participants, msg)
+
+	// wait for responses from all recipients
+	for _, ptc := range participants {
+		if ptc.c != nil && ptc.v == "uncertain" {
+			r := bufio.NewReader(ptc.c)
+
+			// read ack from recipient
+			r.ReadString('\n')
+		}
+	}
+}
+
+// TODO: REVIEW
+func sendToUncertainParticipants(participants []response, msg string) {
+	// send message to participants
+	for i, resp := range participants {
+		if resp.v == "uncertain" {
+			_, err := fmt.Fprintln(resp.c, msg)
+			if err != nil {
+				participants[i].c = nil
+			}
+		}
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// crash                                                                     //
 ///////////////////////////////////////////////////////////////////////////////
 
 func crash() {
@@ -786,4 +1199,58 @@ func writeToDtLog(entry ...interface{}) {
 	}
 
 	fmt.Fprintln(file, entry...)
+}
+
+// TODO: REVIEW
+// returns the most recent vote or decision corresponding to the given song
+//
+// the following values are possible:
+//  vote:	"" (no vote found), "yes"
+//  decision:	"" (no decision found), "commit", "abort", "pre-commit"
+func readVoteOrDecisionFromLog(song string) (vote, decision string) {
+	log, err := ioutil.ReadFile(DT_LOG)
+	if err != nil {
+		return
+	}
+
+	lines := bytes.Split(log, []byte{'\n'})
+	songBytes := []byte(song)
+	if len(lines) == 0 {
+		return
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		// check to see if the song is the same as in the operation
+		// then set vote or decision accordingly
+		args := bytes.Split(lines[i], []byte{' '})
+		if len(args) < 3 {
+			continue
+		}
+		logSong := args[2]
+		if bytes.Equal(logSong, songBytes) {
+			switch string(args[0]) {
+			case "start-3pc":
+				// I was the coordinator, I neither voted nor
+				// made a decision
+				return
+			case "commit":
+				// I committed
+				decision = "commit"
+				return
+			case "abort":
+				// I aborted
+				decision = "abort"
+				return
+			case "yes":
+				// I am Uncertain
+				vote = "yes"
+				return
+			case "pre-commit":
+				// I am Commitable
+				decision = "pre-commit"
+				return
+			}
+		}
+	}
+
+	return
 }
