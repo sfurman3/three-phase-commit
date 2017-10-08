@@ -852,13 +852,19 @@ func terminationProtocolParticipantBody(conn net.Conn, c *bufio.Reader, req, son
 		Error("participant did not receive expected state-req: ", req)
 	}
 
-	var state string
-	vote, decision := readVoteOrDecisionFromLog(song)
+	var state, url string
+	logArgs := strings.Split(operation, " ")
+	if len(logArgs) >= 3 {
+		url = logArgs[2]
+	}
+	vote, decision := readVoteOrDecisionFromLog(logArgs[0], song, url)
+	// TODO: REMOVE
+	fmt.Println(ID, "read vote", vote, "and decision", decision)
 	if decision == "commit" {
 		state = "commit"
 	} else if decision == "pre-commit" {
 		state = "pre-commit"
-	} else if decision == "abort" || vote == "" {
+	} else if decision == "abort" || vote != "yes" {
 		state = "abort"
 	} else {
 		state = "uncertain"
@@ -1053,7 +1059,12 @@ func terminationProtocolCoordinatorBody(resps []response, song, operation string
 		}
 	}
 
-	vote, decision := readVoteOrDecisionFromLog(song)
+	var url string
+	logArgs := strings.Split(operation, " ")
+	if len(logArgs) >= 3 {
+		url = logArgs[2]
+	}
+	vote, decision := readVoteOrDecisionFromLog(logArgs[0], song, url)
 	if coordAborted := decision == "abort"; anyAborted || coordAborted {
 		// case TR1
 		if !coordAborted {
@@ -1207,17 +1218,20 @@ func writeToDtLog(entry ...interface{}) {
 // the following values are possible:
 //  vote:	"" (no vote found), "yes"
 //  decision:	"" (no decision found), "commit", "abort", "pre-commit"
-func readVoteOrDecisionFromLog(song string) (vote, decision string) {
+func readVoteOrDecisionFromLog(op, song, url string) (vote, decision string) {
 	log, err := ioutil.ReadFile(DT_LOG)
 	if err != nil {
 		return
 	}
 
 	lines := bytes.Split(log, []byte{'\n'})
-	songBytes := []byte(song)
 	if len(lines) == 0 {
 		return
 	}
+
+	opBytes := []byte(op)
+	songBytes := []byte(song)
+	urlBytes := []byte(url)
 	for i := len(lines) - 1; i >= 0; i-- {
 		// check to see if the song is the same as in the operation
 		// then set vote or decision accordingly
@@ -1225,28 +1239,35 @@ func readVoteOrDecisionFromLog(song string) (vote, decision string) {
 		if len(args) < 3 {
 			continue
 		}
+
+		logOp := args[1]
 		logSong := args[2]
-		if bytes.Equal(logSong, songBytes) {
+		var logUrl []byte
+		if len(args) > 3 {
+			logUrl = args[3]
+		}
+		if bytes.Equal(logOp, opBytes) && bytes.Equal(logSong, songBytes) && bytes.Equal(logUrl, urlBytes) {
 			switch string(args[0]) {
 			case "start-3pc":
 				// I was the coordinator, I neither voted nor
 				// made a decision
 				return
 			case "commit":
-				// I committed
+				// I committed; I must have voted yes
 				decision = "commit"
+				vote = "yes"
 				return
 			case "abort":
-				// I aborted
+				// I aborted; I may have voted yes
 				decision = "abort"
-				return
 			case "yes":
-				// I am Uncertain
+				// I am uncertain; I must not have decided
 				vote = "yes"
 				return
 			case "pre-commit":
-				// I am Commitable
+				// I am commitable; I must have voted yes
 				decision = "pre-commit"
+				vote = "yes"
 				return
 			}
 		}
