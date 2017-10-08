@@ -30,12 +30,10 @@ func execute(conn net.Conn, command string) {
 			getCoordinator(conn, args[1])
 		}
 	case "delete":
-		// TODO: maybe remove COORDINATOR check
 		if COORDINATOR == ID && argLengthAtLeast(2) {
 			deleteCoordinator(args[1:])
 		}
 	case "add":
-		// TODO: maybe remove COORDINATOR check
 		if COORDINATOR == ID && argLengthAtLeast(3) {
 			addCoordinator(args[1:])
 		}
@@ -61,62 +59,15 @@ func execute(conn net.Conn, command string) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// recovery   								     //
+// coordinator                                                               //
 ///////////////////////////////////////////////////////////////////////////////
 
-// TODO:
-// somehow you believe you are the coordinator
-// - You are process 0 and you have no log
-// - You are not process 0, but you detect that p0 has died (i.e. no
-//   heartbeat)
-
-// before you notify the master, you check with the other processes
-// have no records; if they do, then they did something without your knowledge
-
-func recoverFromFailure() {
-	// TODO: check if there are any alive processes with a current state?
-
-	log, err := ioutil.ReadFile(DT_LOG)
-	if err != nil {
-		return
-	}
-
-	lines := bytes.Split(log, []byte{'\n'})
-	if len(lines) == 0 {
-		return
-	}
-
-	for _, line := range lines {
-		args := bytes.Split(line, []byte{' '})
-		if len(args) < 3 {
-			continue
-		}
-
-		if string(args[0]) == "commit" {
-			switch string(args[1]) {
-			case "add":
-				LocalPlaylist.AddOrUpdateSong(string(args[2]), string(args[3]))
-			case "delete":
-				LocalPlaylist.DeleteSong(string(args[2]))
-			}
-		}
-	}
-
-	// TODO: Ask every process that is alive for the value?
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// coordinator								     //
-///////////////////////////////////////////////////////////////////////////////
-
-// TODO
 type response struct {
 	v  string
 	c  net.Conn
 	id int
 }
 
-// TODO
 func getCoordinator(conn net.Conn, song string) {
 	// check the local playlist
 	url := LocalPlaylist.GetSongUrl(song)
@@ -136,8 +87,6 @@ func getCoordinator(conn net.Conn, song string) {
 				continue
 			}
 
-			// TODO: REMOVE
-			fmt.Println(ID, LastTimestamp.GetAlive(time.Now()))
 			resp, err := sendAndWaitForResponse(mJson, id)
 			if err != nil {
 				continue
@@ -148,12 +97,6 @@ func getCoordinator(conn net.Conn, song string) {
 				if args[0] == "resp" && args[1] != "NONE" {
 					url = string(args[1])
 					LocalPlaylist.AddOrUpdateSong(song, url)
-					// TODO: DELETE?
-					//
-					// MAYBE because you might get a value
-					// that is about to be removed in a
-					// current commit and then you'll
-					// create an inconsistent state
 					writeToDtLog("commit add", song, url)
 					break
 				}
@@ -164,13 +107,11 @@ func getCoordinator(conn net.Conn, song string) {
 	fmt.Fprintln(conn, "resp", url)
 }
 
-// TODO
 func addCoordinator(args []string) {
 	song := args[0]
 	url := args[1]
 	coordinatorVote := vote(url)
 
-	// TODO: maybe write start-3pc first
 	// abort immediately if the coordinator votes no
 	if coordinatorVote == "no" {
 		MessagesToMaster.Enqueue("ack abort")
@@ -239,7 +180,6 @@ func addCoordinator(args []string) {
 	}
 }
 
-// TODO
 func deleteCoordinator(args []string) {
 	song := args[0]
 
@@ -305,82 +245,6 @@ func deleteCoordinator(args []string) {
 	}
 }
 
-func updateCoordinator(update string, args []string) {
-	song := args[0]
-	url := args[1]
-	coordinatorVote := vote(url)
-	operation := update + " " + song + " " + url
-
-	// abort immediately if the coordinator votes no
-	if coordinatorVote == "no" {
-		MessagesToMaster.Enqueue("ack abort")
-		return
-	}
-
-	// write start-3pc record in DT log
-	writeToDtLog("start-3pc", operation)
-
-	// send VOTE-REQ to all participants
-	// AND wait for vote messages from all participants
-	resps, err := sendVoteREQToParticipantsAndAwaitResponses(
-		fmt.Sprintf("vote-req %s", operation))
-	defer func() {
-		for _, resp := range resps {
-			resp.c.Close()
-		}
-	}()
-	if err != nil {
-		// write abort record in DT log
-		writeToDtLog("abort", update)
-
-		// send abort to all processes that voted yes
-		sendAbortToYesVoters(resps)
-
-		// send abort to master
-		MessagesToMaster.Enqueue("ack abort")
-		return
-	}
-
-	// check that all participants voted yes
-	allVotedYes := true
-	for _, resp := range resps {
-		if resp.v != "yes" {
-			allVotedYes = false
-			break
-		}
-	}
-
-	if allVotedYes {
-		// send pre-commit to all participants
-		sendToParticipantsAndAwaitAcks(resps, "pre-commit")
-
-		// write commit record to DT log
-		writeToDtLog("commit", update)
-
-		// send commit to all participants
-		sendToParticipantsAndAwaitAcks(resps, "commit")
-
-		// send abort to master
-		MessagesToMaster.Enqueue("ack commit")
-
-		// add song to local playlist
-		LocalPlaylist.AddOrUpdateSong(song, url)
-	} else {
-		// some participant voted no
-
-		// write abort record in DT log
-		writeToDtLog("abort", update)
-
-		// send abort to all processes that voted yes
-		sendAbortToYesVoters(resps)
-
-		// send abort to master
-		MessagesToMaster.Enqueue("ack abort")
-	}
-
-	return
-}
-
 func sendVoteREQToParticipantsAndAwaitResponses(msg string) ([]response, error) {
 	type connection struct {
 		c  net.Conn
@@ -398,8 +262,6 @@ func sendVoteREQToParticipantsAndAwaitResponses(msg string) ([]response, error) 
 
 	// send message to participants
 	participants := LastTimestamp.GetAlive(time.Now())
-	// TODO: REMOVE
-	fmt.Println("broadcast participants:", participants)
 	if CrashVoteREQ && len(CrashVoteREQList) == 0 {
 		Fatal(ID, "CrashVoteREQ")
 	}
@@ -524,7 +386,7 @@ func sendToParticipantsAndAwaitAcks(participants []response, msg string) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// participant								     //
+// participant                                                               //
 ///////////////////////////////////////////////////////////////////////////////
 
 func getParticipant(conn net.Conn, song string) {
@@ -677,26 +539,11 @@ func vote(url string) string {
 	}
 }
 
-func waitForMessageFromCoordinator(conn net.Conn) (string, error, bool) {
-	r := bufio.NewReader(conn)
-	// increase the TIMEOUT because a msg must be sent to each other
-	// participant
-	response, err := r.ReadString('\n')
-	if err != nil {
-		Error("timed out when reading response from coordinator")
-		return "", err, true
-	}
-
-	return strings.TrimSpace(response), nil, false
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // election protocol                                                         //
 ///////////////////////////////////////////////////////////////////////////////
 
 func initiateElectionProtocol(ptcps []int) (elected bool, participants []int) {
-	// TODO: REMOVE
-	fmt.Println(ID, "electing a new coordinator; was", COORDINATOR)
 	for ; len(ptcps) > 0 && COORDINATOR >= ptcps[0]; ptcps = ptcps[1:] {
 	}
 	if len(ptcps) > 0 {
@@ -705,11 +552,6 @@ func initiateElectionProtocol(ptcps []int) (elected bool, participants []int) {
 	} else {
 		COORDINATOR = ID
 	}
-
-	// TODO: REMOVE
-	fmt.Print("\033[33m")
-	fmt.Println(ID, "elected", COORDINATOR)
-	fmt.Print("\033[0m")
 
 	if COORDINATOR == ID {
 		// tell the master that this server is the coordinator
@@ -722,21 +564,14 @@ func initiateElectionProtocol(ptcps []int) (elected bool, participants []int) {
 
 func initiateElectionAndTerminationProtocol(ln net.Listener, song, operation string, terminationCoordinator func(ptcps []int)) {
 	elected, participants := initiateElectionProtocol(LastTimestamp.GetAlive(time.Now()))
-	// TODO: REMOVE
-	fmt.Println(ID, "initiateElectionAndTerminationProtocol", operation)
-	fmt.Println(ID, "elected:", elected, "participants", participants)
 	if elected {
 		terminationCoordinator(participants)
 	} else {
-		// TODO: REMOVE?
 		lnr := (ln).(*net.TCPListener)
-		//defer lnr.SetDeadline(time.Time{})
 
 	start:
 		// wait for state-req from coordinator
-		//lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 		conn, err := lnr.Accept()
-		// TODO: FIXERUP
 		if err != nil {
 			elected, participants := initiateElectionProtocol(participants)
 			if elected {
@@ -768,9 +603,7 @@ func initiateElectionAndTerminationProtocol(ln net.Listener, song, operation str
 }
 
 func handleStateReq(ln net.Listener, conn net.Conn, req string, args []string) {
-	// TODO: REMOVE?
 	lnr := (ln).(*net.TCPListener)
-	//defer lnr.SetDeadline(time.Time{})
 
 	var terminationCoordinator func(ptcps []int)
 	song := args[2]
@@ -802,7 +635,6 @@ start:
 	//lnr.SetDeadline(time.Now().Add(TIMEOUT * time.Duration(NUM_PROCS)))
 	conn.Close()
 	conn, err := lnr.Accept()
-	// TODO: FIXERUP
 	if err != nil {
 		elected, participants := initiateElectionProtocol(participants)
 		if elected {
@@ -835,20 +667,12 @@ start:
 func terminationProtocolParticipantBody(conn net.Conn, c *bufio.Reader, req, song,
 	operation string, participants []int, terminationCoordinator func(ptcps []int)) (gotoStart bool) {
 
-	// TODO: REMOVE
-	req = strings.TrimSpace(req)
-	if strings.Split(req, " ")[0] != "state-req" {
-		Error("participant did not receive expected state-req: ", req)
-	}
-
 	var state, url string
 	logArgs := strings.Split(operation, " ")
 	if len(logArgs) >= 3 {
 		url = logArgs[2]
 	}
 	vote, decision := readVoteOrDecisionFromLog(logArgs[0], song, url)
-	// TODO: REMOVE
-	fmt.Println(ID, "read vote", vote, "and decision", decision)
 	if decision == "commit" {
 		state = "commit"
 	} else if decision == "pre-commit" {
@@ -860,8 +684,6 @@ func terminationProtocolParticipantBody(conn net.Conn, c *bufio.Reader, req, son
 	}
 
 	// send state to coordinator
-	// TODO: REMOVE
-	fmt.Println("termination participant", ID, "sent", state)
 	_, err := fmt.Fprintln(conn, state)
 	if err != nil {
 		elected, participants := initiateElectionProtocol(participants)
@@ -886,13 +708,9 @@ func terminationProtocolParticipantBody(conn net.Conn, c *bufio.Reader, req, son
 		}
 	}
 
-	// TODO: REMOVE
-	fmt.Println(ID, "received", resp, "from coordinator")
 	switch resp {
 	case "abort":
 		if noAbortInDtLog := decision == ""; noAbortInDtLog {
-			// TODO: REMOVE
-			fmt.Println(ID, "writing abort to log")
 			writeToDtLog("abort", operation)
 		}
 	case "commit":
@@ -928,8 +746,6 @@ func terminationProtocolParticipantBody(conn net.Conn, c *bufio.Reader, req, son
 			Error("coordinator responded with \"", resp, "\" instead of 'commit'")
 		}
 
-		// TODO: REMOVE
-		fmt.Println(ID, "writing commit to log")
 		writeToDtLog("commit", operation)
 		args := strings.Split(operation, " ")
 		switch args[0] {
@@ -947,17 +763,12 @@ func terminationProtocolParticipantBody(conn net.Conn, c *bufio.Reader, req, son
 // termination protocol coordinator                                          //
 ///////////////////////////////////////////////////////////////////////////////
 
-// TODO: REVIEW
 func addTerminationProtocolCoordinator(participants []int, song, url string) {
 	// send STATE-REQ to all participants
 	// AND wait for state report messages
 	operation := fmt.Sprintf("add %s %s", song, url)
-	// TODO: REMOVE
-	fmt.Println(ID, "sending state-reqs")
 	resps := broadcastToParticipantsAndAwaitResponsesTermination(
 		participants, "state-req "+operation)
-	// TODO: REMOVE
-	fmt.Println(ID, "responses", resps)
 	defer func() {
 		for _, resp := range resps {
 			resp.c.Close()
@@ -966,7 +777,6 @@ func addTerminationProtocolCoordinator(participants []int, song, url string) {
 	terminationProtocolCoordinatorBody(resps, song, operation)
 }
 
-// TODO: REVIEW
 func deleteTerminationProtocolCoordinator(participants []int, song string) {
 	// send STATE-REQ to all participants
 	// AND wait for state report messages
@@ -981,7 +791,6 @@ func deleteTerminationProtocolCoordinator(participants []int, song string) {
 	terminationProtocolCoordinatorBody(resps, song, operation)
 }
 
-// TODO: REVIEW
 func broadcastToParticipantsAndAwaitResponsesTermination(participants []int, msg string) []response {
 	type connection struct {
 		c  net.Conn
@@ -1025,7 +834,6 @@ func broadcastToParticipantsAndAwaitResponsesTermination(participants []int, msg
 	return responses
 }
 
-// TODO: REVIEW
 func terminationProtocolCoordinatorBody(resps []response, song, operation string) {
 	// check for decisions from participants
 	anyAborted := false
@@ -1059,8 +867,6 @@ func terminationProtocolCoordinatorBody(resps []response, song, operation string
 		if !coordAborted {
 			writeToDtLog("abort", operation)
 		}
-		// TODO: REMOVE
-		fmt.Println("coordinator sending aborts to participants", resps)
 		sendToParticipants(resps, "abort")
 	} else if coordCommitted := decision == "commit"; anyCommitted || coordCommitted {
 		// case TR2
@@ -1077,8 +883,6 @@ func terminationProtocolCoordinatorBody(resps []response, song, operation string
 		sendToParticipants(resps, "commit")
 	} else if iAmUncertain := vote == "yes"; allUncertain && iAmUncertain {
 		// case TR3
-		// TODO: REMOVE
-		fmt.Println("coordinator voted yes; sending aborts to participants")
 		writeToDtLog("abort", operation)
 		sendToParticipants(resps, "abort")
 	} else {
@@ -1096,7 +900,6 @@ func terminationProtocolCoordinatorBody(resps []response, song, operation string
 	}
 }
 
-// TODO: REVIEW
 func sendToParticipants(participants []response, msg string) {
 	// send message to participants
 	for i, ptc := range participants {
@@ -1107,7 +910,6 @@ func sendToParticipants(participants []response, msg string) {
 	}
 }
 
-// TODO: REVIEW
 func sendToUncertainParticipantsAndAwaitAcks(participants []response, msg string) {
 	// send message to participants
 	sendToUncertainParticipants(participants, msg)
@@ -1123,7 +925,6 @@ func sendToUncertainParticipantsAndAwaitAcks(participants []response, msg string
 	}
 }
 
-// TODO: REVIEW
 func sendToUncertainParticipants(participants []response, msg string) {
 	// send message to participants
 	for i, resp := range participants {
@@ -1187,7 +988,7 @@ func crashPartialCommit(args []string) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// DT log     								     //
+// DT log                                                                    //
 ///////////////////////////////////////////////////////////////////////////////
 
 func writeToDtLog(entry ...interface{}) {
@@ -1201,7 +1002,6 @@ func writeToDtLog(entry ...interface{}) {
 	fmt.Fprintln(file, entry...)
 }
 
-// TODO: REVIEW
 // returns the most recent vote or decision corresponding to the given song
 //
 // the following values are possible:

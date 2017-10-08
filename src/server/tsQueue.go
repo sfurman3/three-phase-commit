@@ -7,42 +7,6 @@ import (
 	"time"
 )
 
-type tsMsgQueue struct {
-	value []*Message
-	mutex sync.Mutex // mutex for accessing contents
-}
-
-func (tsq *tsMsgQueue) Enqueue(msg *Message) {
-	tsq.mutex.Lock()
-	defer tsq.mutex.Unlock()
-	tsq.value = append(tsq.value, msg)
-}
-
-func (tsq *tsMsgQueue) Dequeue() *Message {
-	tsq.mutex.Lock()
-	defer tsq.mutex.Unlock()
-	var v *Message
-	if len(tsq.value) > 0 {
-		v = tsq.value[0]
-		tsq.value = tsq.value[1:]
-	}
-	return v
-}
-
-func (tsq *tsMsgQueue) WriteMessages(rwr *bufio.ReadWriter) {
-	tsq.mutex.Lock()
-	defer tsq.mutex.Unlock()
-	if len(tsq.value) > 0 {
-		msgs := tsq.value
-		lst := len(msgs) - 1
-		for _, msg := range msgs[:lst] {
-			rwr.WriteString(msg.Content)
-			rwr.WriteByte(',')
-		}
-		rwr.WriteString(msgs[lst].Content)
-	}
-}
-
 type tsTimestampQueue struct {
 	value []time.Time
 	mutex sync.Mutex // mutex for accessing contents

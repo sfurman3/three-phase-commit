@@ -9,14 +9,6 @@ type Message struct {
 	Content string    `json:"msg"` // content of the message
 }
 
-// emptyMessage returns an empty message with a timestamp of time.Now()
-func emptyMessage() *Message {
-	return &Message{
-		Id:  ID,
-		Rts: time.Now(),
-	}
-}
-
 // newMessage returns a message with Content msg and a timestamp of time.Now()
 func newMessage(msg string) *Message {
 	return &Message{

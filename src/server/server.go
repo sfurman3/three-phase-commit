@@ -83,7 +83,6 @@ var (
 	DT_LOG      string // name of server's DT Log file
 
 	LocalPlaylist    playlist         // in-memory copy of server's playlist
-	MessagesFIFO     tsMsgQueue       // all received messages in FIFO order
 	LastTimestamp    tsTimestampQueue // timestamp of last message from each server
 	MessagesToMaster tsStringQueue    // pending messages to master
 
@@ -145,22 +144,6 @@ func main() {
 	serveMaster()
 }
 
-func determineInitialCoordinator(ln net.Listener) {
-	// broadcast some empty messages to indicate the server is alive
-	broadcast(emptyMessage())
-
-	time.Sleep(1000 * time.Millisecond) // wait for other servers to spin up
-
-	// determine the coordinator's identity
-	COORDINATOR = LastTimestamp.LowestIdAlive()
-	// TODO: remove
-	fmt.Println(ID, "elected", COORDINATOR)
-	if COORDINATOR == ID {
-		// tell the master that this server is the coordinator
-		MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
-	}
-}
-
 // heartbeat sleeps for HEARTBEAT_INTERVAL and broadcasts an empty message to
 // every server to indicate that the server is still alive
 func heartbeat() {
@@ -201,8 +184,6 @@ func heartbeat() {
 			// this case neither thinks the coordinator has died,
 			// so neither updates the coordinator
 			if coordinator > COORDINATOR {
-				// TODO: REMOVE
-				fmt.Println(ID, "setting coordinator to", coordinator)
 				COORDINATOR = coordinator
 				MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(COORDINATOR))
 			}
@@ -240,11 +221,7 @@ func fetchMessages(ln net.Listener) {
 			lock.Lock()
 			if COORDINATOR != ID && !LastTimestamp.IsAlive(COORDINATOR) {
 				alive := LastTimestamp.GetAlive(time.Now())
-				// TODO: REMOVE
-				fmt.Println(ID, "alive", alive)
 				COORDINATOR = alive[0]
-				// TODO: REMOVE
-				fmt.Println(ID, "elected", COORDINATOR)
 				if COORDINATOR == ID {
 					MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(ID))
 				}
@@ -306,9 +283,6 @@ func handleMessage(ln net.Listener, conn net.Conn) {
 		return
 	}
 
-	// TODO: REMOVE
-	fmt.Println(ID, "received", msg.Content)
-
 	args := strings.Split(msg.Content, " ")
 	argLengthAtLeast := func(min int) bool {
 		if len(args) < min {
@@ -340,13 +314,7 @@ func handleMessage(ln net.Listener, conn net.Conn) {
 					strings.Join(args, " "), "\"")
 			}
 		}
-	default:
-		// TODO
-		fmt.Println(ID, "ignored", msg.Content)
 	}
-
-	// TODO: REMOVE
-	MessagesFIFO.Enqueue(msg)
 }
 
 // serveMaster listens on MASTER_PORT for a connection from a master process
@@ -378,9 +346,6 @@ func handleMaster(masterConn net.Conn) {
 	master := bufio.NewReader(bufio.NewReader(masterConn))
 
 	for {
-		// TODO: replace with direct writes to master connection in child
-		// calls
-		//
 		// send the next pending message to master
 		msg := MessagesToMaster.Dequeue()
 		if msg != "" {
@@ -402,99 +367,8 @@ func handleMaster(masterConn net.Conn) {
 		}
 
 		command = strings.TrimSpace(command)
-		// TODO: REMOVE
-		fmt.Println(ID, "received:", command)
 		execute(masterConn, command)
 	}
-}
-
-// TODO: Delete?
-func writeMessages(rwr *bufio.ReadWriter) {
-	rwr.WriteString("messages ")
-	MessagesFIFO.WriteMessages(rwr)
-	rwr.WriteByte('\n')
-
-	err := rwr.Flush()
-	if err != nil {
-		Fatal(err)
-	}
-}
-
-// TODO: Delete?
-func writeAlive(rwr *bufio.ReadWriter) {
-	now := time.Now()
-
-	rwr.WriteString("alive ")
-	LastTimestamp.WriteAlive(rwr, now)
-	rwr.WriteByte('\n')
-
-	err := rwr.Flush()
-	if err != nil {
-		Fatal(err)
-	}
-}
-
-// broadcast sends the given message to all other servers (including itself and
-// excluding the master)
-//
-// NOTE: Sends are sequential, so that broadcast does not return until an
-// attempt has been made to send the message to all servers
-//
-// NOTE: This function must be called sequentially (NOT by starting a new
-// thread for each new message) in order to maintain FIFO receipt. Otherwise,
-// depending on scheduling, a message B could be broadcast to a server before
-// another message A, even though A's thread was started first.
-//
-// The disadvantage is that, if the receipt of one message is delayed for any
-// of its recipients, then all of the subsequent commands sent by the master
-// are also delayed (until the send times out). This may cause servers to not
-// receive the message on time. This is likely not an issue when working with a
-// small number of servers.
-//
-// NOTE: If FIFO receipt is no longer necessary, the recipient can simply sort
-// delivered messages by send timestamp in order to approximate the send order.
-// They could also use a causal delivery method provided by a data structure
-// such as the vector.MessageReceptacle to deliver messages based on causal
-// precedence.
-func broadcast(msg *Message) {
-	// Convert to JSON
-	msgBytes, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-	msgJSON := string(msgBytes)
-
-	// send non-empty messages to self
-	if len(msg.Content) != 0 {
-		MessagesFIFO.Enqueue(msg)
-	}
-
-	// send message to other servers
-	for id := 0; id < NUM_PROCS; id++ {
-		if id == ID {
-			continue
-		}
-
-		sendMarshaled(msgJSON, id)
-	}
-}
-
-// send a message to the server with the given id
-func sendMarshaled(msg string, id int) error {
-	// TODO: In the future, you may want to consider using
-	// net.DialTimeout (e.g. the recipient is so busy it cannot
-	// service the send in a reasonable amount of time) and/or
-	// consider starting a new thread for every send to prevent
-	// sends from blocking each other (the timeout might help
-	// prevent a buildup of threads that can't progress)
-	conn, err := net.Dial("tcp", ":"+strconv.Itoa(START_PORT+id))
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	_, err = fmt.Fprintln(conn, msg)
-	return err
 }
 
 // sendAndWaitForResponse takes a Message marshaled into JSON and tries to send
@@ -523,7 +397,6 @@ func sendAndWaitForResponse(msg string, id int) ([]byte, error) {
 	resp, err := r.ReadBytes('\n')
 	if err != nil {
 		if netErr := err.(net.Error); netErr.Timeout() {
-			// TODO: Update UP set?
 			return nil, errors.New("timeout")
 		}
 		return nil, err
