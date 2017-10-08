@@ -4,8 +4,8 @@ if [ -z "$1" ] && [ "$1" == "debug" ]; then
     debug="debug"
 fi
 
-working_tests="$(ls tests/*.input | grep -v -e 'partial' -e 'totalFailure')"
-for t in $working_tests; do
+tests="$(ls tests/*.input)"
+for t in $tests; do
     result="$(./master.py $debug < $t)"
     diff -s <(echo "$result") ${t%'.input'}'.output' &>/dev/null
     if [ $? == 0 ]; then
