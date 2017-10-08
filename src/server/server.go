@@ -182,11 +182,30 @@ func heartbeat() {
 				continue
 			}
 
-			id, err := strconv.Atoi(strings.TrimSpace(msg))
+			msg = strings.TrimSpace(msg)
+			args := strings.Split(msg, " ")
+			id, err := strconv.Atoi(args[0])
+			if err != nil {
+				continue
+			}
+			coordinator, err := strconv.Atoi(args[1])
 			if err != nil {
 				continue
 			}
 
+			// update the coordinator if another process has a
+			// higher one (i.e. it was elected before the current
+			// process). this avoids the issue of multiple
+			// coordinators. for example imagine 2 spins up and
+			// elects itself, then 0 spins up and elects itself) in
+			// this case neither thinks the coordinator has died,
+			// so neither updates the coordinator
+			if coordinator > COORDINATOR {
+				// TODO: REMOVE
+				fmt.Println(ID, "setting coordinator to", coordinator)
+				COORDINATOR = coordinator
+				MessagesToMaster.Enqueue("coordinator " + strconv.Itoa(COORDINATOR))
+			}
 			LastTimestamp.UpdateTimestampById(id)
 		}
 	}()
@@ -197,14 +216,14 @@ func heartbeat() {
 				conn, err := net.Dial("tcp", ":"+strconv.Itoa(END_PORT-id))
 				if err == nil {
 					defer conn.Close()
-					fmt.Fprintln(conn, ID)
+					fmt.Fprintln(conn, ID, COORDINATOR)
 				}
 			}
 			for id := ID + 1; id < NUM_PROCS; id++ {
 				conn, err := net.Dial("tcp", ":"+strconv.Itoa(END_PORT-id))
 				if err == nil {
 					defer conn.Close()
-					fmt.Fprintln(conn, ID)
+					fmt.Fprintln(conn, ID, COORDINATOR)
 				}
 			}
 		}()

@@ -74,46 +74,35 @@ func execute(conn net.Conn, command string) {
 // have no records; if they do, then they did something without your knowledge
 
 func recoverFromFailure() {
-	// TODO: there's no log file OR the log file is empty; you were either
-	// a coordinator that never initiated a 3PC protocol OR you were a
-	// participant that either never received a VOTE-REQ or crashed before
-	// you could write your vote to the log; You have to wait until you get
-	// a message from someone else
+	// TODO: check if there are any alive processes with a current state?
 
-	// if your id is 0, you are the current coordinator
-
-	// if your id is 0 and you have no log (OR your log is empty)
-
-	// TODO: open the DT Log and try to read the latest value
-	var penultEntry string
-	var lastEntry string
-
-	// recovered coordinator
-	if lastEntry == "start-3PC" {
-		// TODO: failed before sending a decision
-		// TODO: write abort to the DT log
-		// TODO: send abort to participants
-	}
-	if penultEntry == "start-3PC" {
+	log, err := ioutil.ReadFile(DT_LOG)
+	if err != nil {
+		return
 	}
 
-	switch lastEntry {
-	case "start-3PC":
-		// TODO: I was the coordinator
-	case "commit":
-		switch penultEntry {
-		case "start-3PC":
-			// TODO: I decided commit
-		case "abort":
-		case "commit":
+	lines := bytes.Split(log, []byte{'\n'})
+	if len(lines) == 0 {
+		return
+	}
+
+	for _, line := range lines {
+		args := bytes.Split(line, []byte{' '})
+		if len(args) < 3 {
+			continue
 		}
-	case "abort":
-		if penultEntry == "start-3PC" {
-			// TODO: I decided commit
+
+		if string(args[0]) == "commit" {
+			switch string(args[1]) {
+			case "add":
+				LocalPlaylist.AddOrUpdateSong(string(args[2]), string(args[3]))
+			case "delete":
+				LocalPlaylist.DeleteSong(string(args[2]))
+			}
 		}
-	default:
-		// TODO
 	}
+
+	// TODO: Ask every process that is alive for the value?
 }
 
 ///////////////////////////////////////////////////////////////////////////////
